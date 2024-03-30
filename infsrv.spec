@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 a = Analysis(
-    ['src/main.py'],
+    ['infsrv/__main__.py'],
     pathex=[],
     binaries=[],
     datas=[],

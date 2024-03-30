@@ -1,3 +1,7 @@
 .PHONY: pkg-infsrv
 pkg-infsrv:
-	pyinstaller infsrv/pyi.spec --distpath target --workpath target/pyi-build
+	pyinstaller infsrv.spec --distpath target --workpath target/infsrv-build
+
+.PHONY: run-infsrv
+run-infsrv:
+	python -B infsrv
