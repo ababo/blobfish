@@ -1,12 +1,14 @@
-from tornado.websocket import WebSocketHandler
+import logging
 
+from tornado.websocket import WebSocketHandler
 
 class SegmentHandler(WebSocketHandler):
     def open(self):
-        print("open")
+        logging.info('open')
 
     def on_message(self, message):
-        self.write_message(message)
+        logging.info(f'message {len(message)} bytes')
+        # self.write_message(message)
 
     def on_close(self):
-        print("close")
+        logging.info("close")

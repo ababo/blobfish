@@ -1,13 +1,15 @@
-import argparse
+from argparse import ArgumentParser, Namespace
 import asyncio
 import logging
-import segment
 import os
-import tornado
+
+from tornado.web import Application
+
+import segment
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
+def parse_args() -> Namespace:
+    parser = ArgumentParser(
         prog='infsrv',
         description='Blobfish Inference Server')
     parser.add_argument('-l', '--log-level', default='INFO')
@@ -18,8 +20,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def make_web_app() -> tornado.web.Application:
-    return tornado.web.Application([
+def make_web_app() -> Application:
+    return Application([
         (r"/segment", segment.SegmentHandler),
     ])
 
