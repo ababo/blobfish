@@ -29,8 +29,11 @@ def make_web_app() -> Application:
 async def main():
     args = parse_args()
 
-    logging.basicConfig(level=args.log_level.upper())
-    logging.info('starting infsrv')
+    logging.basicConfig(
+        format='%(asctime)s.%(msecs)03d %(levelname)s %(message)s',
+        level=logging.INFO,
+        datefmt='%Y-%m-%d %H:%M:%S')
+    logging.info(f'starting infsrv with args {vars(args)}')
 
     app = make_web_app()
     app.listen(args.server_port, args.server_address)
