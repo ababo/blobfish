@@ -1,11 +1,13 @@
 from argparse import ArgumentParser, Namespace
 import asyncio
-import logging
 import os
 
 from tornado.web import Application
 
 import segment
+import util
+
+logger = util.add_logger('infsrv')
 
 
 def parse_args() -> Namespace:
@@ -26,14 +28,10 @@ def make_web_app() -> Application:
     ])
 
 
-async def main():
+async def main() -> None:
     args = parse_args()
-
-    logging.basicConfig(
-        format='%(asctime)s.%(msecs)03d %(levelname)s %(message)s',
-        level=logging.INFO,
-        datefmt='%Y-%m-%d %H:%M:%S')
-    logging.info(f'starting infsrv with args {vars(args)}')
+    util.setup_logging(args.log_level)
+    logger.info(f'starting infsrv with args {vars(args)}')
 
     app = make_web_app()
     app.listen(args.server_port, args.server_address)
