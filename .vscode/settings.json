@@ -1,10 +1,20 @@
 {
     "cSpell.words": [
         "Blobfish",
+        "bootloader",
+        "codesign",
+        "datas",
+        "dtype",
+        "DTYPES",
+        "frombuffer",
+        "hiddenimports",
         "httputil",
         "infsrv",
+        "keepdim",
         "levelname",
         "lpcm",
-        "msecs"
+        "msecs",
+        "pyannote",
+        "torchaudio"
     ]
 }

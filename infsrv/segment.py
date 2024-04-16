@@ -1,15 +1,27 @@
 from http import HTTPStatus
 from typing import Any
 
+from pyannote.audio import Pipeline
+from pyannote.core.annotation import Annotation
+import torch
 from tornado.httputil import HTTPServerRequest
 from tornado.web import Application, HTTPError
 from tornado.websocket import WebSocketHandler
 
 import util
 
+SAMPLE_SIZES = {'i16': 2, 'i32': 4, 'f32': 4}
+SAMPLE_DTYPES = {'i16': torch.int16, 'i32': torch.int32, 'f32': torch.float32}
+
 logger = util.add_logger('segment')
 
-SAMPLE_SIZES = {'i16': 2, 'i32': 4, 'f32': 4}
+pyannote_pipeline: None | Pipeline = None
+
+
+def load_pyannote(config_file: str, torch_device: str) -> None:
+    global pyannote_pipeline
+    pyannote_pipeline = Pipeline.from_pretrained(config_file)
+    pyannote_pipeline.to(torch.device(torch_device))
 
 
 class SegmentHandler(WebSocketHandler):
@@ -106,10 +118,21 @@ class SegmentHandler(WebSocketHandler):
         self._buffer.add(message)
 
     def on_close(self) -> None:
-        logger.info("close")
+        logger.info('close')
 
     def _process_step(self) -> None:
-        logger.info("_process_step")
+        data = self._buffer.data()
+        dtype = SAMPLE_DTYPES[self.sample_type]
+        waveform = torch.frombuffer(data, dtype=dtype)
+        waveform = waveform.reshape((-1, self.num_channels))
+        waveform = torch.transpose(waveform, 0, 1)
+        waveform = torch.mean(waveform.float(), dim=0, keepdim=True)
+        if not dtype.is_floating_point:
+            sample_size = SAMPLE_SIZES[self.sample_type]
+            waveform /= 2 ** (sample_size * 8 - 1) - 1
+        audio = {'waveform': waveform, 'sample_rate': self.sample_rate}
+        annotation: Annotation = pyannote_pipeline(audio)
+        logger.info(f'segments {annotation}')
 
 
 class CircularBuffer:
