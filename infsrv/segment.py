@@ -37,7 +37,7 @@ class SegmentHandler(WebSocketHandler):
 
         capacity = self.rolling_window_duration * self.num_channels * \
             self.sample_rate * SAMPLE_SIZES[self.sample_type] // 1000
-        self._buffer = CircularBuffer(capacity)
+        self._buffer = util.RingBuffer(capacity)
 
         self._bytes_written = 0
 
@@ -133,26 +133,3 @@ class SegmentHandler(WebSocketHandler):
         audio = {'waveform': waveform, 'sample_rate': self.sample_rate}
         annotation: Annotation = pyannote_pipeline(audio)
         logger.info(f'segments {annotation}')
-
-
-class CircularBuffer:
-    def __init__(self, capacity) -> Any:
-        self._data = bytearray(capacity)
-        self._length = 0
-        self._from = 0
-
-    def __len__(self) -> int:
-        return self._length
-
-    def add(self, data: bytearray | bytes) -> Any:
-        data = data[-min(len(data), len(self._data)):]
-        to = (self._from + self._length) % len(self._data)
-        until_wraparound = min(len(data), len(self._data)-to)
-        self._data[to:to+until_wraparound] = data[:until_wraparound]
-        self._data[:len(data)-until_wraparound] = data[until_wraparound:]
-        self._from = max(len(data)-until_wraparound, self._from)
-        self._length = min(self._length+len(data), len(self._data))
-
-    def data(self) -> bytearray:
-        shifted = self._data[self._from:]+self._data[:self._from]
-        return shifted[:self._length]
