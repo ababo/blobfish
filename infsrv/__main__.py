@@ -5,7 +5,7 @@ import os
 import torch
 from tornado.web import Application
 
-import segment
+from handler.segment import load_pyannote, SegmentHandler
 import util
 
 logger = util.add_logger('infsrv')
@@ -34,7 +34,7 @@ def parse_args() -> Namespace:
 
 def make_web_app() -> Application:
     return Application([
-        (r"/segment", segment.SegmentHandler),
+        (r"/segment", SegmentHandler),
     ])
 
 
@@ -44,7 +44,7 @@ async def main() -> None:
     logger.info(f'starting infsrv with args {vars(args)}')
 
     torch.set_default_device(args.torch_device)
-    segment.load_pyannote(args.pyannote_model, args.torch_device)
+    load_pyannote(args.pyannote_model, args.torch_device)
     logger.info(f'loaded models')
 
     app = make_web_app()

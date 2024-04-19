@@ -10,6 +10,7 @@
         "hiddenimports",
         "httputil",
         "infsrv",
+        "itertracks",
         "keepdim",
         "levelname",
         "lpcm",

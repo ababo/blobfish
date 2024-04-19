@@ -10,4 +10,4 @@ run-infsrv:
 
 .PHONY: test-infsrv
 test-infsrv:
-	pytest infsrv/test
+	pytest infsrv/test -vv -l -p no:cacheprovider
