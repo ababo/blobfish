@@ -16,6 +16,7 @@
         "lpcm",
         "msecs",
         "pyannote",
+        "thiserror",
         "torchaudio"
     ]
 }
