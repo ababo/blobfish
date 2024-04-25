@@ -17,6 +17,7 @@
         "msecs",
         "pyannote",
         "thiserror",
-        "torchaudio"
+        "torchaudio",
+        "vorbis"
     ]
 }

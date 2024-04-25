@@ -32,7 +32,7 @@ impl Server {
         F: Future<Output = ()> + Send + 'static,
     {
         let app = Router::<Arc<Server>>::new()
-            .route("/transcribe", get(transcribe::transcribe_handler))
+            .route("/transcribe", get(transcribe::handle_transcribe))
             .with_state(self);
 
         info!("started HTTP/WS server");
