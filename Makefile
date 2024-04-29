@@ -8,7 +8,7 @@ pkg-infsrv:
 
 .PHONY: run-bfsrv
 run-bfsrv:
-	cargo run
+	cargo run --release
 
 .PHONY: run-infsrv
 run-infsrv:

@@ -10,6 +10,7 @@ env_logger = { workspace = true }
 futures = { workspace = true }
 log = { workspace = true }
 ogg = { workspace = true }
+rubato = { workspace = true }
 symphonia = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }

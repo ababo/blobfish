@@ -10,6 +10,7 @@ use axum::{
 use futures::{stream::SplitSink, StreamExt, TryStreamExt};
 use log::debug;
 use ogg::reading::async_api::PacketReader;
+use rubato::{FastFixedIn, PolynomialDegree, Resampler};
 use std::{
     io::{Error as IoError, ErrorKind as IoErrorKind},
     mem::swap,
@@ -17,7 +18,7 @@ use std::{
 };
 use symphonia::{
     core::{
-        audio::AudioBufferRef,
+        audio::{AudioBuffer, AudioBufferRef, Signal},
         codecs::{CodecParameters, Decoder, DecoderOptions, CODEC_TYPE_VORBIS},
         formats::Packet as SymphoniaPacket,
     },
@@ -25,6 +26,9 @@ use symphonia::{
 };
 
 const VORBIS_CONTENT_TYPE: &str = "audio/ogg; codecs=vorbis";
+
+/// Economical sample rate that is enough for speech recognition.
+const SAMPLE_RATE: u32 = 16000;
 
 /// Handle transcribe requests.
 pub async fn handle_transcribe(
@@ -93,7 +97,12 @@ async fn ws_callback(server: Arc<Server>, socket: WebSocket) {
                         return;
                     }
                 };
-                process_audio_buffer(server.as_ref(), &mut context, buf).await;
+
+                let AudioBufferRef::F32(buf_f32) = buf else {
+                    debug!("unsupported type of decoded samples");
+                    return;
+                };
+                process_audio_buffer(server.as_ref(), &mut context, buf_f32.into_owned()).await;
             }
         }
         packet_index += 1;
@@ -102,14 +111,82 @@ async fn ws_callback(server: Arc<Server>, socket: WebSocket) {
 
 struct Context {
     _sender: SplitSink<WebSocket, Message>,
+    merged: Vec<f32>,
+    resampled: Vec<f32>,
+    resampler: Option<FastFixedIn<f32>>,
 }
 
 impl Context {
     fn new(_sender: SplitSink<WebSocket, Message>) -> Self {
-        Self { _sender }
+        Self {
+            _sender,
+            merged: Vec::new(),
+            resampled: Vec::new(),
+            resampler: None,
+        }
     }
 }
 
-async fn process_audio_buffer(_server: &Server, _context: &mut Context, buf: AudioBufferRef<'_>) {
-    debug!("num decoded samples {}", buf.frames());
+async fn process_audio_buffer(_server: &Server, context: &mut Context, buf: AudioBuffer<f32>) {
+    normalize_audio_buffer(context, buf);
+}
+
+fn normalize_audio_buffer(context: &mut Context, buf: AudioBuffer<f32>) {
+    let offset = context.merged.len();
+
+    // Merge the channels into one (mono).
+    context.merged.resize(offset + buf.frames(), 0.0);
+    context.merged[offset..].fill(0.0);
+    for i in 0..buf.spec().channels.count() {
+        context.merged[offset..]
+            .iter_mut()
+            .zip(buf.chan(i).iter())
+            .for_each(|(m, s)| *m += (*s - *m) / (i + 1) as f32);
+    }
+
+    // Resample into SAMPLE_RATE.
+    if buf.spec().rate != SAMPLE_RATE {
+        const CHUNK_SIZE: usize = 1024;
+        if context.resampler.is_none() {
+            context.resampler = Some(
+                FastFixedIn::<f32>::new(
+                    SAMPLE_RATE as f64 / buf.spec().rate as f64,
+                    1.0,
+                    PolynomialDegree::Linear,
+                    CHUNK_SIZE,
+                    1,
+                )
+                .unwrap(),
+            );
+        }
+
+        if context.merged.len() < CHUNK_SIZE {
+            context.resampled.clear();
+            return;
+        }
+
+        const OUTPUT_MARGIN: usize = 10;
+        let ratio = SAMPLE_RATE as f32 / buf.spec().rate as f32;
+        context.resampled.resize(
+            (context.merged.len() as f32 * ratio) as usize + OUTPUT_MARGIN,
+            0.0,
+        );
+
+        let (in_samples, out_samples) = context
+            .resampler
+            .as_mut()
+            .unwrap()
+            .process_into_buffer(
+                &[context.merged.as_slice()],
+                &mut [context.resampled.as_mut_slice()],
+                None,
+            )
+            .unwrap();
+
+        context.merged.drain(..in_samples);
+        context.resampled.truncate(out_samples);
+    } else {
+        context.resampled.clear();
+        swap(&mut context.merged, &mut context.resampled);
+    }
 }
