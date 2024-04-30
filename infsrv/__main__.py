@@ -24,7 +24,7 @@ def parse_args() -> Namespace:
                         default=env('PYANNOTE_MODEL',
                                     'model/pyannote/config.yaml'))
     parser.add_argument('-a', '--server-address',
-                        default=env('SERVER_ADDRESS'))
+                        default=env('SERVER_ADDRESS', '127.0.0.1'))
     parser.add_argument('-p', '--server-port',
                         default=env('SERVER_PORT', '80'))
     parser.add_argument('--torch-device', default=env('TORCH_DEVICE', 'cpu'))

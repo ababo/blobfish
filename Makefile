@@ -1,6 +1,4 @@
 export PYTHONDONTWRITEBYTECODE=1
-export RUST_LOG=debug
-export SERVER_ADDRESS=127.0.0.1:3030
 
 .PHONY: pkg-infsrv
 pkg-infsrv:
@@ -8,10 +6,15 @@ pkg-infsrv:
 
 .PHONY: run-bfsrv
 run-bfsrv:
+	INFSRV_URL=ws://127.0.0.1:8001/segment \
+	RUST_LOG=debug \
+	SERVER_ADDRESS=127.0.0.1:8000 \
 	cargo run --release
 
 .PHONY: run-infsrv
 run-infsrv:
+	LOG_LEVEL=debug \
+	SERVER_PORT=8001 \
 	python infsrv
 
 .PHONY: test-infsrv

@@ -22,7 +22,7 @@ async fn main() {
 async fn run(config: Arc<Config>) -> Result<()> {
     env_logger::init();
 
-    let server = Arc::new(Server::new());
+    let server = Arc::new(Server::new(config.clone()));
     let server_handle = tokio::spawn(async move {
         server
             .serve(&config.server_address, shutdown_signal())

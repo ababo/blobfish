@@ -191,6 +191,8 @@ dependencies = [
  "symphonia",
  "thiserror",
  "tokio",
+ "tokio-tungstenite",
+ "url",
 ]
 
 [[package]]

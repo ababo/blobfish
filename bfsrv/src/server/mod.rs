@@ -1,6 +1,7 @@
 mod middleware;
 mod transcribe;
 
+use crate::config::Config;
 use axum::{routing::get, Router};
 use log::info;
 use std::{future::Future, net::SocketAddr, sync::Arc};
@@ -18,12 +19,14 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// HTTP/WS server for Handler.
-pub struct Server {}
+pub struct Server {
+    config: Arc<Config>,
+}
 
 impl Server {
     /// Create a new Server instance.
-    pub fn new() -> Server {
-        Server {}
+    pub fn new(config: Arc<Config>) -> Server {
+        Server { config }
     }
 
     /// Serve HTTP/WS requests with graceful shutdown on a given signal.
