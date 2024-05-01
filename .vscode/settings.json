@@ -4,6 +4,7 @@
         "bootloader",
         "codesign",
         "datas",
+        "Deque",
         "dtype",
         "DTYPES",
         "frombuffer",

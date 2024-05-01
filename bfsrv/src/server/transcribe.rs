@@ -11,13 +11,16 @@ use futures::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt, TryStreamExt,
 };
+use hound::{SampleFormat, WavSpec, WavWriter};
 use log::debug;
 use ogg::reading::async_api::PacketReader;
 use rubato::{FastFixedIn, PolynomialDegree, Resampler};
+use serde::Deserialize;
 use std::{
-    io::{Error as IoError, ErrorKind as IoErrorKind},
+    collections::VecDeque,
+    io::{Cursor, Error as IoError, ErrorKind as IoErrorKind, Write},
     mem::swap,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 use symphonia::{
     core::{
@@ -121,10 +124,29 @@ async fn process_segments(
     _server: Arc<Server>,
     mut _client_sender: SplitSink<AxumWebSocket, AxumWsMessage>,
     mut infsrv_receiver: SplitStream<TungsteniteWebsocket>,
-    _ring_buffer: Arc<RingBuffer>,
+    ring_buffer: Arc<RingBuffer>,
 ) {
     while let Some(Ok(TungsteniteMessage::Text(json))) = infsrv_receiver.next().await {
         debug!("segment {}", json.trim());
+
+        #[derive(Deserialize)]
+        struct Segment {
+            begin: u32,
+            end: Option<u32>,
+        }
+        let segment: Segment = serde_json::from_str(&json).unwrap();
+
+        if let Some(end) = segment.end {
+            let wav = ring_buffer.extract_interval_wav(segment.begin, end);
+
+            std::fs::File::create_new(format!(
+                "/Users/ababo/Desktop/{}-{}.wav",
+                segment.begin, end
+            ))
+            .unwrap()
+            .write_all(&wav)
+            .unwrap();
+        }
     }
 }
 
@@ -304,12 +326,60 @@ impl AudioStreamProcessor {
     }
 }
 
-struct RingBuffer {}
+struct RingBuffer {
+    sample_rate: u32,
+    contents: Mutex<(VecDeque<i16>, usize)>,
+}
 
 impl RingBuffer {
-    fn with_capacity(_sample_rate: u32, _capacity_msecs: u32) -> Self {
-        Self {}
+    fn with_capacity(sample_rate: u32, capacity_msecs: u32) -> Self {
+        let deque = VecDeque::with_capacity((sample_rate / 1000 * capacity_msecs) as usize);
+        Self {
+            sample_rate,
+            contents: Mutex::new((deque, 0)),
+        }
     }
 
-    fn push(&self, _sample: i16) {}
+    fn push(&self, sample: i16) {
+        let mut contents = self.contents.lock().unwrap();
+        if contents.0.len() == contents.0.capacity() {
+            contents.0.pop_front();
+        }
+        contents.0.push_back(sample);
+        contents.1 += 1;
+    }
+
+    /// Extract a given interval as WAV data.
+    fn extract_interval_wav(&self, begin: u32, end: u32) -> Vec<u8> {
+        let contents = self.contents.lock().unwrap();
+
+        let frame_offset = contents.1 - contents.0.len();
+        let msec_samples = self.sample_rate as usize / 1000;
+
+        let get_index = |msecs| {
+            ((msecs as usize * msec_samples).max(frame_offset) - frame_offset)
+                .min(contents.0.len() - 1)
+        };
+
+        const WAV_HEADER_SIZE: usize = 44;
+        let (from_index, to_index) = (get_index(begin), get_index(end));
+        let capacity = WAV_HEADER_SIZE + (to_index - from_index) * 2;
+        let mut data = Vec::with_capacity(capacity);
+
+        let spec = WavSpec {
+            channels: 1,
+            sample_rate: self.sample_rate,
+            bits_per_sample: 16,
+            sample_format: SampleFormat::Int,
+        };
+        let mut writer = WavWriter::new(Cursor::new(&mut data), spec).unwrap();
+
+        for i in from_index..to_index {
+            writer.write_sample(contents.0[i]).unwrap();
+        }
+
+        writer.finalize().unwrap();
+        assert_eq!(data.len(), capacity);
+        data
+    }
 }
