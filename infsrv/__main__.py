@@ -22,7 +22,7 @@ def parse_args() -> Namespace:
                         default=env('LOG_LEVEL', 'INFO'))
     parser.add_argument('--pyannote-model',
                         default=env('PYANNOTE_MODEL',
-                                    'model/pyannote/config.yaml'))
+                                    'model/pyannote/config-3.0.yaml'))
     parser.add_argument('-a', '--server-address',
                         default=env('SERVER_ADDRESS', '127.0.0.1'))
     parser.add_argument('-p', '--server-port',
