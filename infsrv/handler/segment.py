@@ -1,4 +1,5 @@
 from http import HTTPStatus
+import json
 from typing import Any
 
 from pyannote.audio import Pipeline
@@ -8,11 +9,12 @@ from tornado.httputil import HTTPServerRequest
 from tornado.web import Application, HTTPError
 from tornado.websocket import WebSocketHandler
 
-from segment import Segment, Segmenter
 import util
 
 SAMPLE_SIZES = {'i16': 2, 'i32': 4, 'f32': 4}
 SAMPLE_DTYPES = {'i16': torch.int16, 'i32': torch.int32, 'f32': torch.float32}
+
+TIME_EPSILON = 100
 
 logger = util.add_logger('segment')
 
@@ -36,109 +38,117 @@ class SegmentHandler(WebSocketHandler):
 
         self._setup_request_params()
 
-        capacity = self.rolling_window_duration * self.num_channels * \
-            self.sample_rate * SAMPLE_SIZES[self.sample_type] // 1000
-        self._buffer = util.RingBuffer(capacity)
-        self._bytes_written = 0
+        window_buffer_len = self._window_duration * self._num_channels * \
+            self._sample_rate * SAMPLE_SIZES[self._sample_type] // 1000
+        self._window_buffer = bytearray(window_buffer_len)
+        self._window_buffer_index = 0
 
-        self._segmenter = Segmenter(
-            self.rolling_window_duration, self.rolling_window_step)
+        self._time_offset = 0
+        self._trailing_begin = None
 
     def _setup_request_params(self):
         try:
-            self.rolling_window_duration = int(
-                self.get_query_argument('rwd', '5000'))
-            if self.rolling_window_duration < 100 or \
-                    self.rolling_window_duration > 10000:
+            self._window_duration = int(
+                self.get_query_argument('wd', '5000'))
+            if self._window_duration < 1000 or \
+                    self._window_duration > 10000:
                 raise Exception
         except:
             raise HTTPError(HTTPStatus.BAD_REQUEST,
-                            "malformed or unsupported 'rwd' "
-                            '(rolling window duration msecs) query parameter')
+                            "malformed or unsupported 'wd' "
+                            '(window duration msecs) query parameter')
 
         try:
-            self.rolling_window_step = int(
-                self.get_query_argument('rws', '1000'))
-            if self.rolling_window_step < 100 or \
-                    self.rolling_window_step > 10000:
+            self._num_channels = int(self.get_query_argument('nc'))
+            if self._num_channels < 1 or self._num_channels > 8:
                 raise Exception
         except:
             raise HTTPError(HTTPStatus.BAD_REQUEST,
-                            "malformed or unsupported 'rws' "
-                            '(rolling window step msecs) query parameter')
-
-        try:
-            self.num_channels = int(self.get_query_argument('nc'))
-            if self.num_channels < 1 or self.num_channels > 8:
-                raise Exception
-        except:
-            raise HTTPError(HTTPStatus.BAD_REQUEST,
-                            'missing or malformed or unsupported '
+                            'missing, malformed or unsupported '
                             "'nc' (number of channels) query parameter")
 
         try:
-            self.sample_rate = int(self.get_query_argument('sr'))
-            if self.sample_rate < 8000 or self.sample_rate > 192000:
+            self._sample_rate = int(self.get_query_argument('sr'))
+            if self._sample_rate < 8000 or self._sample_rate > 192000:
                 raise Exception
         except:
             raise HTTPError(HTTPStatus.BAD_REQUEST,
                             'missing, malformed or unsupported '
                             "'sr' (sample rate) query parameter")
 
-        self.sample_type = self.get_query_argument('st')
-        if self.sample_type not in SAMPLE_SIZES.keys():
+        self._sample_type = self.get_query_argument('st')
+        if self._sample_type not in SAMPLE_SIZES.keys():
             raise HTTPError(HTTPStatus.BAD_REQUEST,
                             "missing or unknown 'st' (sample type) "
                             "query parameter, expected 'i16', 'i32' or 'f32'")
 
-        self.content_type = self.request.headers.get('Content-Type')
-        if self.content_type != 'audio/lpcm':
+        content_type = self.request.headers.get('Content-Type')
+        if content_type != 'audio/lpcm':
             raise HTTPError(HTTPStatus.BAD_REQUEST,
                             "unsupported audio type, expected 'audio/lpcm'")
 
     def open(self) -> None:
+        logger.debug('open /segment')
         pass
 
     def on_message(self, message) -> None:
         if type(message) != bytes:
             return
 
-        sample_size = SAMPLE_SIZES[self.sample_type]
-        num_step_bytes = self.rolling_window_step * self.num_channels * \
-            self.sample_rate * sample_size // 1000
+        window_len = len(self._window_buffer)
+        while self._window_buffer_index + len(message) >= window_len:
+            extent = window_len - self._window_buffer_index
+            self._window_buffer[self._window_buffer_index:] = message[:extent]
+            self._window_buffer_index = 0
+            self._process_window()
+            message = message[extent:]
 
-        step_remainder = self._bytes_written % num_step_bytes
-        self._bytes_written += len(message)
-
-        while step_remainder + len(message) >= num_step_bytes:
-            num_bytes_to_add = num_step_bytes-step_remainder
-            step_remainder = 0
-            self._buffer.add(message[:num_bytes_to_add])
-            self._process_step()
-            message = message[num_bytes_to_add:]
-
-        self._buffer.add(message)
+        index = self._window_buffer_index
+        self._window_buffer[index:index+len(message)] = message
+        self._window_buffer_index += len(message)
 
     def on_close(self) -> None:
-        pass
+        logger.debug('on_close /segment')
 
-    def _process_step(self) -> None:
-        data = self._buffer.data()
-        dtype = SAMPLE_DTYPES[self.sample_type]
-        waveform = torch.frombuffer(data, dtype=dtype)
-        waveform = waveform.reshape((-1, self.num_channels))
+    def _process_window(self) -> None:
+        dtype = SAMPLE_DTYPES[self._sample_type]
+        waveform = torch.frombuffer(self._window_buffer, dtype=dtype)
+        waveform = waveform.reshape((-1, self._num_channels))
         waveform = torch.transpose(waveform, 0, 1)
         waveform = torch.mean(waveform.float(), dim=0, keepdim=True)
         if not dtype.is_floating_point:
-            sample_size = SAMPLE_SIZES[self.sample_type]
+            sample_size = SAMPLE_SIZES[self._sample_type]
             waveform /= 2 ** (sample_size * 8 - 1) - 1
-        audio = {'waveform': waveform, 'sample_rate': self.sample_rate}
+        audio = {'waveform': waveform, 'sample_rate': self._sample_rate}
         annotation: Annotation = pyannote_pipeline(audio)
 
-        segments = []
         for segment, _ in annotation.itertracks():
-            segments.append(
-                Segment(begin=int(segment.start*1000),
-                        end=int(segment.end*1000)))
-        for segment in self._segmenter.add_rolling_window(segments):
-            self.write_message(segment.to_json()+'\n')
+            begin = int(segment.start * 1000)
+            end = int(segment.end * 1000)
+
+            trailing = abs(self._window_duration - end) < TIME_EPSILON
+            if self._trailing_begin is not None:
+                if begin < TIME_EPSILON:
+                    if trailing:
+                        break
+                    self._write_segment(self._trailing_begin,
+                                        self._time_offset + end)
+                    self._trailing_begin = None
+                    continue
+                else:
+                    self._write_segment(
+                        self._trailing_begin, self._time_offset)
+                    self._trailing_begin = None
+
+            if trailing:
+                self._trailing_begin = self._time_offset + begin
+                break
+
+            self._write_segment(self._time_offset + begin,
+                                self._time_offset + end)
+
+        self._time_offset += self._window_duration
+
+    def _write_segment(self, begin: int, end: int):
+        logger.debug(f'written segment {begin}ms-{end}ms')
+        self.write_message(json.dumps({'begin': begin, 'end': end}) + '\n')

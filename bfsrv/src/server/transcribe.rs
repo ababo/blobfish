@@ -132,21 +132,20 @@ async fn process_segments(
         #[derive(Deserialize)]
         struct Segment {
             begin: u32,
-            end: Option<u32>,
+            end: u32,
         }
         let segment: Segment = serde_json::from_str(&json).unwrap();
+        debug!("read segment {}ms-{}ms", segment.begin, segment.end);
 
-        if let Some(end) = segment.end {
-            let wav = ring_buffer.extract_interval_wav(segment.begin, end);
+        let wav = ring_buffer.extract_interval_wav(segment.begin, segment.end);
 
-            std::fs::File::create_new(format!(
-                "/Users/ababo/Desktop/{}-{}.wav",
-                segment.begin, end
-            ))
-            .unwrap()
-            .write_all(&wav)
-            .unwrap();
-        }
+        std::fs::File::create_new(format!(
+            "/Users/ababo/Desktop/{}-{}.wav",
+            segment.begin, segment.end
+        ))
+        .unwrap()
+        .write_all(&wav)
+        .unwrap();
     }
 }
 
