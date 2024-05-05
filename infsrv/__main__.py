@@ -8,10 +8,10 @@ from tornado.web import Application
 from handler.segment import load_pyannote, SegmentHandler
 import util
 
-logger = util.add_logger('infsrv')
+_logger = util.add_logger('infsrv')
 
 
-def parse_args() -> Namespace:
+def _parse_args() -> Namespace:
     env = os.environ.get
 
     parser = ArgumentParser(
@@ -32,22 +32,24 @@ def parse_args() -> Namespace:
     return parser.parse_args()
 
 
-def make_web_app() -> Application:
+def _make_web_app() -> Application:
     return Application([
         (r"/segment", SegmentHandler),
     ])
 
 
 async def main() -> None:
-    args = parse_args()
+    """Inference server logic."""
+
+    args = _parse_args()
     util.setup_logging(args.log_level)
-    logger.info(f'starting infsrv with args {vars(args)}')
+    _logger.info(f'starting infsrv with args {vars(args)}')
 
     torch.set_default_device(args.torch_device)
     load_pyannote(args.pyannote_model, args.torch_device)
-    logger.info(f'loaded models')
+    _logger.info(f'loaded models')
 
-    app = make_web_app()
+    app = _make_web_app()
     app.listen(args.server_port, args.server_address)
 
     await asyncio.Event().wait()

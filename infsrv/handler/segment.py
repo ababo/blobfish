@@ -1,33 +1,36 @@
 from http import HTTPStatus
 import json
-from typing import Any
+from typing import Any, Tuple
 
 from pyannote.audio import Pipeline
-from pyannote.core.annotation import Annotation
+from pyannote.core.annotation import Annotation, Segment
+from pyannote.core.utils.types import TrackName
 import torch
 from tornado.httputil import HTTPServerRequest
 from tornado.web import Application, HTTPError
 from tornado.websocket import WebSocketHandler
 
+from segment import ChunkDivider, SegmentProducer
 import util
 
-SAMPLE_SIZES = {'i16': 2, 'i32': 4, 'f32': 4}
-SAMPLE_DTYPES = {'i16': torch.int16, 'i32': torch.int32, 'f32': torch.float32}
+_SAMPLE_SIZES = {'i16': 2, 'i32': 4, 'f32': 4}
+_SAMPLE_DTYPES = {'i16': torch.int16, 'i32': torch.int32, 'f32': torch.float32}
 
-TIME_EPSILON = 100
+_logger = util.add_logger('segment')
 
-logger = util.add_logger('segment')
-
-pyannote_pipeline: None | Pipeline = None
+_pyannote_pipeline: None | Pipeline = None
 
 
 def load_pyannote(config_file: str, torch_device: str) -> None:
-    global pyannote_pipeline
-    pyannote_pipeline = Pipeline.from_pretrained(config_file)
-    pyannote_pipeline.to(torch.device(torch_device))
+    """Load a given pyannote.audio model."""
+    global _pyannote_pipeline
+    _pyannote_pipeline = Pipeline.from_pretrained(config_file)
+    _pyannote_pipeline.to(torch.device(torch_device))
 
 
 class SegmentHandler(WebSocketHandler):
+    """Websocket handler for realtime audio segmentation."""
+
     def __init__(
         self,
         application: Application,
@@ -39,12 +42,11 @@ class SegmentHandler(WebSocketHandler):
         self._setup_request_params()
 
         window_buffer_len = self._window_duration * self._num_channels * \
-            self._sample_rate * SAMPLE_SIZES[self._sample_type] // 1000
-        self._window_buffer = bytearray(window_buffer_len)
-        self._window_buffer_index = 0
+            self._sample_rate * _SAMPLE_SIZES[self._sample_type] // 1000
+        self._chunk_divider = ChunkDivider(
+            window_buffer_len, self._process_window)
 
-        self._time_offset = 0
-        self._trailing_begin = None
+        self._segment_producer = SegmentProducer(self._window_duration, 100)
 
     def _setup_request_params(self):
         try:
@@ -77,7 +79,7 @@ class SegmentHandler(WebSocketHandler):
                             "'sr' (sample rate) query parameter")
 
         self._sample_type = self.get_query_argument('st')
-        if self._sample_type not in SAMPLE_SIZES.keys():
+        if self._sample_type not in _SAMPLE_SIZES.keys():
             raise HTTPError(HTTPStatus.BAD_REQUEST,
                             "missing or unknown 'st' (sample type) "
                             "query parameter, expected 'i16', 'i32' or 'f32'")
@@ -88,67 +90,35 @@ class SegmentHandler(WebSocketHandler):
                             "unsupported audio type, expected 'audio/lpcm'")
 
     def open(self) -> None:
-        logger.debug('open /segment')
+        _logger.debug('open /segment')
         pass
 
     def on_message(self, message) -> None:
-        if type(message) != bytes:
-            return
-
-        window_len = len(self._window_buffer)
-        while self._window_buffer_index + len(message) >= window_len:
-            extent = window_len - self._window_buffer_index
-            self._window_buffer[self._window_buffer_index:] = message[:extent]
-            self._window_buffer_index = 0
-            self._process_window()
-            message = message[extent:]
-
-        index = self._window_buffer_index
-        self._window_buffer[index:index+len(message)] = message
-        self._window_buffer_index += len(message)
+        if type(message) == bytes:
+            self._chunk_divider.add(message)
 
     def on_close(self) -> None:
-        logger.debug('on_close /segment')
+        _logger.debug('on_close /segment')
 
-    def _process_window(self) -> None:
-        dtype = SAMPLE_DTYPES[self._sample_type]
-        waveform = torch.frombuffer(self._window_buffer, dtype=dtype)
+    def _process_window(self, data: bytes) -> None:
+        dtype = _SAMPLE_DTYPES[self._sample_type]
+        waveform = torch.frombuffer(data, dtype=dtype)
         waveform = waveform.reshape((-1, self._num_channels))
         waveform = torch.transpose(waveform, 0, 1)
         waveform = torch.mean(waveform.float(), dim=0, keepdim=True)
         if not dtype.is_floating_point:
-            sample_size = SAMPLE_SIZES[self._sample_type]
+            sample_size = _SAMPLE_SIZES[self._sample_type]
             waveform /= 2 ** (sample_size * 8 - 1) - 1
         audio = {'waveform': waveform, 'sample_rate': self._sample_rate}
-        annotation: Annotation = pyannote_pipeline(audio)
+        annotation: Annotation = _pyannote_pipeline(audio)
 
-        for segment, _ in annotation.itertracks():
-            begin = int(segment.start * 1000)
-            end = int(segment.end * 1000)
+        segments = self._segment_producer.next_window(
+            map(_track_to_interval, annotation.itertracks()))
 
-            trailing = abs(self._window_duration - end) < TIME_EPSILON
-            if self._trailing_begin is not None:
-                if begin < TIME_EPSILON:
-                    if trailing:
-                        break
-                    self._write_segment(self._trailing_begin,
-                                        self._time_offset + end)
-                    self._trailing_begin = None
-                    continue
-                else:
-                    self._write_segment(
-                        self._trailing_begin, self._time_offset)
-                    self._trailing_begin = None
+        for begin, end in segments:
+            _logger.debug(f'written segment {begin}ms-{end}ms')
+            self.write_message(json.dumps({'begin': begin, 'end': end}) + '\n')
 
-            if trailing:
-                self._trailing_begin = self._time_offset + begin
-                break
 
-            self._write_segment(self._time_offset + begin,
-                                self._time_offset + end)
-
-        self._time_offset += self._window_duration
-
-    def _write_segment(self, begin: int, end: int):
-        logger.debug(f'written segment {begin}ms-{end}ms')
-        self.write_message(json.dumps({'begin': begin, 'end': end}) + '\n')
+def _track_to_interval(track: Tuple[Segment, TrackName]) -> Tuple[int, int]:
+    return (int(track[0].start * 1000), int(track[0].end * 1000))
