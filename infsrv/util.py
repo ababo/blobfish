@@ -1,5 +1,6 @@
+"""Miscellaneous utilities."""
+
 import logging
-from typing import Any
 
 _loggers: dict[str, logging.Logger] = {}
 

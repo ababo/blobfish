@@ -1,3 +1,5 @@
+"""Tests for segmentation logic."""
+
 from typing import Callable, List, Tuple
 
 from segment import ChunkDivider, SegmentProducer
@@ -21,6 +23,7 @@ def _create_chunk_divider_callback(
 
 
 def test_chunk_divider() -> None:
+    """Perform ChunkDivider sanity test."""
     parts = [b'abcd', b'efgh', b'ijkl']
     callback, assert_consumed = _create_chunk_divider_callback(parts)
 
@@ -33,6 +36,7 @@ def test_chunk_divider() -> None:
 
 
 def test_segment_producer() -> None:
+    """Perform SegmentProducer sanity test."""
     producer = SegmentProducer(100, 2)
 
     segments = producer.next_window([(0, 10), (20, 50), (75, 99)])
@@ -42,7 +46,7 @@ def test_segment_producer() -> None:
     assert segments == [(75, 115), (135, 170)]
 
     segments = producer.next_window([(0, 100)])
-    assert segments == []
+    assert not segments
 
     segments = producer.next_window([(25, 55)])
     assert segments == [(185, 300), (325, 355)]

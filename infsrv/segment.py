@@ -1,11 +1,13 @@
+"""Speech segmentation logic."""
+
 from typing import Callable, Iterable, List, Tuple
 
 
-class ChunkDivider:
+class ChunkDivider: # pylint: disable=too-few-public-methods
     """Splits incoming byte chunks into fixed-size parts."""
 
-    def __init__(self, len: int, callback: Callable[[bytes], None]) -> None:
-        self._buffer = bytearray(len)
+    def __init__(self, length: int, callback: Callable[[bytes], None]) -> None:
+        self._buffer = bytearray(length)
         self._callback = callback
         self._index = 0
 
@@ -24,7 +26,7 @@ class ChunkDivider:
         self._index += len(chunk)
 
 
-class SegmentProducer:
+class SegmentProducer: # pylint: disable=too-few-public-methods
     """Converts in-window intervals into continuous time segments."""
 
     def __init__(self, window_duration: int, time_epsilon: int) -> None:
@@ -49,9 +51,8 @@ class SegmentProducer:
                         (self._trailing_begin, self._time_offset + end))
                     self._trailing_begin = None
                     continue
-                else:
-                    segments.append((self._trailing_begin, self._time_offset))
-                    self._trailing_begin = None
+                segments.append((self._trailing_begin, self._time_offset))
+                self._trailing_begin = None
 
             if trailing:
                 self._trailing_begin = self._time_offset + begin

@@ -1,3 +1,5 @@
+"""Speech segmentation handler."""
+
 from http import HTTPStatus
 import json
 from typing import Any, Tuple
@@ -23,12 +25,12 @@ _pyannote_pipeline: None | Pipeline = None
 
 def load_pyannote(config_file: str, torch_device: str) -> None:
     """Load a given pyannote.audio model."""
-    global _pyannote_pipeline
+    global _pyannote_pipeline  # pylint: disable=global-statement
     _pyannote_pipeline = Pipeline.from_pretrained(config_file)
     _pyannote_pipeline.to(torch.device(torch_device))
 
 
-class SegmentHandler(WebSocketHandler):
+class SegmentHandler(WebSocketHandler):  # pylint: disable=abstract-method
     """Websocket handler for realtime audio segmentation."""
 
     def __init__(
@@ -54,8 +56,8 @@ class SegmentHandler(WebSocketHandler):
                 self.get_query_argument('wd', '5000'))
             if self._window_duration < 1000 or \
                     self._window_duration > 10000:
-                raise Exception
-        except:
+                raise ValueError
+        except:  # pylint: disable=raise-missing-from
             raise HTTPError(HTTPStatus.BAD_REQUEST,
                             "malformed or unsupported 'wd' "
                             '(window duration msecs) query parameter')
@@ -63,8 +65,8 @@ class SegmentHandler(WebSocketHandler):
         try:
             self._num_channels = int(self.get_query_argument('nc'))
             if self._num_channels < 1 or self._num_channels > 8:
-                raise Exception
-        except:
+                raise ValueError
+        except:  # pylint: disable=raise-missing-from
             raise HTTPError(HTTPStatus.BAD_REQUEST,
                             'missing, malformed or unsupported '
                             "'nc' (number of channels) query parameter")
@@ -72,14 +74,14 @@ class SegmentHandler(WebSocketHandler):
         try:
             self._sample_rate = int(self.get_query_argument('sr'))
             if self._sample_rate < 8000 or self._sample_rate > 192000:
-                raise Exception
-        except:
+                raise ValueError
+        except:  # pylint: disable=raise-missing-from
             raise HTTPError(HTTPStatus.BAD_REQUEST,
                             'missing, malformed or unsupported '
                             "'sr' (sample rate) query parameter")
 
         self._sample_type = self.get_query_argument('st')
-        if self._sample_type not in _SAMPLE_SIZES.keys():
+        if self._sample_type not in _SAMPLE_SIZES:
             raise HTTPError(HTTPStatus.BAD_REQUEST,
                             "missing or unknown 'st' (sample type) "
                             "query parameter, expected 'i16', 'i32' or 'f32'")
@@ -89,12 +91,11 @@ class SegmentHandler(WebSocketHandler):
             raise HTTPError(HTTPStatus.BAD_REQUEST,
                             "unsupported audio type, expected 'audio/lpcm'")
 
-    def open(self) -> None:
+    def open(self, *_args: str, **_kwargs: str) -> None:
         _logger.debug('open /segment')
-        pass
 
     def on_message(self, message) -> None:
-        if type(message) == bytes:
+        if isinstance(message, bytes):
             self._chunk_divider.add(message)
 
     def on_close(self) -> None:
@@ -116,7 +117,7 @@ class SegmentHandler(WebSocketHandler):
             map(_track_to_interval, annotation.itertracks()))
 
         for begin, end in segments:
-            _logger.debug(f'written segment {begin}ms-{end}ms')
+            _logger.debug('written segment %dms-%dms', begin, end)
             self.write_message(json.dumps({'begin': begin, 'end': end}) + '\n')
 
 

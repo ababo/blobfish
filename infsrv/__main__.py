@@ -1,3 +1,5 @@
+"""Inference server entry point."""
+
 from argparse import ArgumentParser, Namespace
 import asyncio
 import os
@@ -43,11 +45,11 @@ async def main() -> None:
 
     args = _parse_args()
     util.setup_logging(args.log_level)
-    _logger.info(f'starting infsrv with args {vars(args)}')
+    _logger.info('starting infsrv with args %s', vars(args))
 
     torch.set_default_device(args.torch_device)
     load_pyannote(args.pyannote_model, args.torch_device)
-    _logger.info(f'loaded models')
+    _logger.info('loaded models')
 
     app = _make_web_app()
     app.listen(args.server_port, args.server_address)

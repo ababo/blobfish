@@ -1,5 +1,9 @@
 export PYTHONDONTWRITEBYTECODE=1
 
+.PHONY: lint-infsrv
+lint-infsrv:
+	pylint infsrv
+
 .PHONY: pkg-infsrv
 pkg-infsrv:
 	pyinstaller infsrv.spec --distpath target --workpath target/infsrv-build
