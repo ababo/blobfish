@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "1dd2f2a23dcdd92deab65579ecb0fe8843943a1d019802ab622be86518f47402"
+            "sha256": "6eba660b45440b47d48eafe88a5c3a885512a811d0087d2961ed0dc5e5239497"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -2165,13 +2165,6 @@
         }
     },
     "develop": {
-        "altgraph": {
-            "hashes": [
-                "sha256:1b5afbb98f6c4dcadb2e2ae6ab9fa994bbb8c1d75f4fa96d340f9437ae454406",
-                "sha256:642743b4750de17e655e6711601b077bc6598dbfa3ba5fa2b2a35ce12b508dff"
-            ],
-            "version": "==0.17.4"
-        },
         "astroid": {
             "hashes": [
                 "sha256:951798f922990137ac090c53af473db7ab4e70c770e6d7fae0cec59f74411819",
@@ -2203,14 +2196,6 @@
             ],
             "markers": "python_full_version >= '3.8.0'",
             "version": "==5.13.2"
-        },
-        "macholib": {
-            "hashes": [
-                "sha256:07ae9e15e8e4cd9a788013d81f5908b3609aa76f9b1421bae9c4d7606ec86a30",
-                "sha256:0e315d7583d38b8c77e815b1ecbdbf504a8258d8b3e17b61165c6feb60d18f2c"
-            ],
-            "markers": "sys_platform == 'darwin'",
-            "version": "==1.16.3"
         },
         "mccabe": {
             "hashes": [
@@ -2244,33 +2229,6 @@
             "markers": "python_version >= '3.8'",
             "version": "==1.5.0"
         },
-        "pyinstaller": {
-            "hashes": [
-                "sha256:00996d2090734d9ae4a1e53ed40351b07d593c37118d3e0d435bbcfa8db9edee",
-                "sha256:00d81ddeee97710245a7ed03b0f9d5a4daf6c3a07adf978487b10991e1e20470",
-                "sha256:1fc15e8cebf76361568359a40926aa5746fc0a84ca365fb2ac6caeea014a2cd3",
-                "sha256:2aa771693ee3e0a899be3e9d946a24eab9896a98d0d4035f05a22f1193004cfb",
-                "sha256:7c4a55a5d872c118bc7a5e641c2df46ad18585c002d96adad129b4ee8c104463",
-                "sha256:97197593344f11f3dd2bdadbab14c61fbc4cdf9cc692a89b047cb671764c1824",
-                "sha256:abbd591967593dab264bcc3bcb2466c0a1582f19a112e37e916c4212069c7933",
-                "sha256:b7cab21db6fcfbdab47ee960239d1b44cd95383a4463177bd592613941d67959",
-                "sha256:be6bc2c3073d3e84fb7148d3af33ce9b6a7f01cfb154e06314cd1d4c05798a32",
-                "sha256:cfe3ed214601de0723cb660994b44934efacb77a1cf0e4cc5133da996bcf36ce",
-                "sha256:d2705efe79f8749526f65c4bce70ae88eea8b6adfb051f123122e86542fe3802",
-                "sha256:e2f55fbbdf8a99ea84b39bc5669a68624473c303486d7eb2cd9063b339f0aa28"
-            ],
-            "index": "pypi",
-            "markers": "python_version < '3.13' and python_version >= '3.8'",
-            "version": "==6.6.0"
-        },
-        "pyinstaller-hooks-contrib": {
-            "hashes": [
-                "sha256:0852249b7fb1e9394f8f22af2c22fa5294c2c0366157969f98c96df62410c4c6",
-                "sha256:aa5dee25ea7ca317ad46fa16b5afc8dba3b0e43f2847e498930138885efd3cab"
-            ],
-            "markers": "python_version >= '3.7'",
-            "version": "==2024.5"
-        },
         "pylint": {
             "hashes": [
                 "sha256:507a5b60953874766d8a366e8e8c7af63e058b26345cfcb5f91f89d987fd6b74",
@@ -2288,14 +2246,6 @@
             "index": "pypi",
             "markers": "python_version >= '3.8'",
             "version": "==8.2.0"
-        },
-        "setuptools": {
-            "hashes": [
-                "sha256:6c1fccdac05a97e598fb0ae3bbed5904ccb317337a51139dcd51453611bbb987",
-                "sha256:c636ac361bc47580504644275c9ad802c50415c7522212252c033bd15f301f32"
-            ],
-            "markers": "python_version >= '3.8'",
-            "version": "==69.5.1"
         },
         "tomlkit": {
             "hashes": [

@@ -4,10 +4,6 @@ export PYTHONDONTWRITEBYTECODE=1
 lint-infsrv:
 	pylint infsrv
 
-.PHONY: pkg-infsrv
-pkg-infsrv:
-	pyinstaller infsrv.spec --distpath target --workpath target/infsrv-build
-
 .PHONY: run-bfsrv
 run-bfsrv:
 	INFSRV_URL=ws://127.0.0.1:8001/segment \

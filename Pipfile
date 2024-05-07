@@ -10,7 +10,6 @@ pyannote-audio = "*"
 tornado = "*"
 
 [dev-packages]
-pyinstaller = "*"
 pylint = "*"
 pytest = "*"
 
