@@ -1,8 +1,10 @@
 {
     "cSpell.words": [
+        "bfsrv",
         "Blobfish",
         "bootloader",
         "codesign",
+        "cuda",
         "datas",
         "Deque",
         "dtype",
@@ -21,6 +23,7 @@
         "thiserror",
         "torchaudio",
         "Tungstenite",
-        "vorbis"
+        "vorbis",
+        "wespeaker"
     ]
 }

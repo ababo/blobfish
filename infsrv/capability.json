@@ -1,0 +1,21 @@
+{
+    "capabilities": {
+        "segment-cpu": {
+            "modelConf": "model/pyannote/config-3.0.yaml",
+            "modelDirs": [
+                "model/pyannote",
+                "model/wespeaker"
+            ],
+            "module": "handler/segment",
+            "torchDevice": "cpu"
+        },
+        "segment-cuda": {
+            "modelConf": "model/pyannote/config-3.1.yaml",
+            "modelDirs": [
+                "model/pyannote"
+            ],
+            "module": "handler/segment",
+            "torchDevice": "cuda"
+        }
+    }
+}

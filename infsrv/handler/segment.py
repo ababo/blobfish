@@ -2,7 +2,7 @@
 
 from http import HTTPStatus
 import json
-from typing import Any, Tuple
+from typing import Any, Dict, List, Tuple
 
 from pyannote.audio import Pipeline
 from pyannote.core.annotation import Annotation, Segment
@@ -12,6 +12,7 @@ from tornado.httputil import HTTPServerRequest
 from tornado.web import Application, HTTPError
 from tornado.websocket import WebSocketHandler
 
+from capability import CapabilitySet
 from segment import ChunkDivider, SegmentProducer
 import util
 
@@ -20,14 +21,18 @@ _SAMPLE_DTYPES = {'i16': torch.int16, 'i32': torch.int32, 'f32': torch.float32}
 
 _logger = util.add_logger('segment')
 
-_pyannote_pipeline: None | Pipeline = None
+_pyannote_pipelines: Dict[str, Pipeline] = {}
 
 
-def load_pyannote(config_file: str, torch_device: str) -> None:
-    """Load a given pyannote.audio model."""
-    global _pyannote_pipeline  # pylint: disable=global-statement
-    _pyannote_pipeline = Pipeline.from_pretrained(config_file)
-    _pyannote_pipeline.to(torch.device(torch_device))
+def init(capabilities: List[str]) -> None:
+    """Create pyannote pipelines."""
+    module_capabilities = CapabilitySet.get(). \
+        module_capabilities('handler/segment')
+    for name, capability in module_capabilities.items():
+        if name in capabilities:
+            pipeline = Pipeline.from_pretrained(capability.model_conf)
+            pipeline.to(torch.device(capability.torch_device))
+            _pyannote_pipelines[name] = pipeline
 
 
 class SegmentHandler(WebSocketHandler):  # pylint: disable=abstract-method
@@ -52,17 +57,6 @@ class SegmentHandler(WebSocketHandler):  # pylint: disable=abstract-method
 
     def _setup_request_params(self):
         try:
-            self._window_duration = int(
-                self.get_query_argument('wd', '5000'))
-            if self._window_duration < 1000 or \
-                    self._window_duration > 10000:
-                raise ValueError
-        except:  # pylint: disable=raise-missing-from
-            raise HTTPError(HTTPStatus.BAD_REQUEST,
-                            "malformed or unsupported 'wd' "
-                            '(window duration msecs) query parameter')
-
-        try:
             self._num_channels = int(self.get_query_argument('nc'))
             if self._num_channels < 1 or self._num_channels > 8:
                 raise ValueError
@@ -86,6 +80,26 @@ class SegmentHandler(WebSocketHandler):  # pylint: disable=abstract-method
                             "missing or unknown 'st' (sample type) "
                             "query parameter, expected 'i16', 'i32' or 'f32'")
 
+        try:
+            self._window_duration = int(
+                self.get_query_argument('wd', '5000'))
+            if self._window_duration < 1000 or \
+                    self._window_duration > 10000:
+                raise ValueError
+        except:  # pylint: disable=raise-missing-from
+            raise HTTPError(HTTPStatus.BAD_REQUEST,
+                            "malformed or unsupported 'wd' "
+                            '(window duration msecs) query parameter')
+
+        capabilities = self.request.headers.get('BLOBFISH_CAPABILITIES')
+        capabilities = [] if capabilities is None else capabilities.split(',')
+        if len(capabilities) != 1 or \
+                capabilities[0] not in _pyannote_pipelines:
+            raise HTTPError(HTTPStatus.BAD_REQUEST,
+                            'missing, unknown or disabled capabilities, '
+                            'expected one in a BLOBFISH_CAPABILITIES header')
+        self._pyannote_pipeline = _pyannote_pipelines[capabilities[0]]
+
         content_type = self.request.headers.get('Content-Type')
         if content_type != 'audio/lpcm':
             raise HTTPError(HTTPStatus.BAD_REQUEST,
@@ -103,7 +117,8 @@ class SegmentHandler(WebSocketHandler):  # pylint: disable=abstract-method
 
     def _process_window(self, data: bytes) -> None:
         dtype = _SAMPLE_DTYPES[self._sample_type]
-        waveform = torch.frombuffer(data, dtype=dtype)
+        device = self._pyannote_pipeline.device
+        waveform = torch.frombuffer(data, dtype=dtype).to(device)
         waveform = waveform.reshape((-1, self._num_channels))
         waveform = torch.transpose(waveform, 0, 1)
         waveform = torch.mean(waveform.float(), dim=0, keepdim=True)
@@ -111,7 +126,7 @@ class SegmentHandler(WebSocketHandler):  # pylint: disable=abstract-method
             sample_size = _SAMPLE_SIZES[self._sample_type]
             waveform /= 2 ** (sample_size * 8 - 1) - 1
         audio = {'waveform': waveform, 'sample_rate': self._sample_rate}
-        annotation: Annotation = _pyannote_pipeline(audio)
+        annotation: Annotation = self._pyannote_pipeline(audio)
 
         segments = self._segment_producer.next_window(
             map(_track_to_interval, annotation.itertracks()))

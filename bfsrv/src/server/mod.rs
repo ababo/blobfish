@@ -6,6 +6,9 @@ use axum::{routing::get, Router};
 use log::info;
 use std::{future::Future, net::SocketAddr, sync::Arc};
 
+/// Blobfish capabilities header name.
+pub const BLOBFISH_CAPABILITIES: &str = "BLOBFISH_CAPABILITIES";
+
 /// Server error.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

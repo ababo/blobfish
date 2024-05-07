@@ -1,4 +1,4 @@
-use crate::server::{middleware::Auth, Server};
+use crate::server::{middleware::Auth, Server, BLOBFISH_CAPABILITIES};
 use axum::{
     extract::{
         ws::{Message as AxumWsMessage, WebSocket as AxumWebSocket},
@@ -68,10 +68,13 @@ pub async fn handle_transcribe(
         .append_pair("nc", "1")
         .append_pair("sr", &SAMPLE_RATE.to_string())
         .append_pair("st", "i16");
+
     let mut request = url.into_client_request().unwrap();
-    request
-        .headers_mut()
-        .append(CONTENT_TYPE, "audio/lpcm".try_into().unwrap());
+    let headers = request.headers_mut();
+    // TODO: Retrieve capabilities dynamically.
+    headers.append(BLOBFISH_CAPABILITIES, "segment-cpu".try_into().unwrap());
+    headers.append(CONTENT_TYPE, "audio/lpcm".try_into().unwrap());
+
     let infsrv_ws = match connect_async(request).await {
         Ok((wss, _)) => wss,
         Err(err) => {

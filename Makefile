@@ -17,6 +17,7 @@ run-bfsrv:
 
 .PHONY: run-infsrv
 run-infsrv:
+	CAPABILITIES=segment-cpu \
 	LOG_LEVEL=debug \
 	SERVER_PORT=8001 \
 	python infsrv

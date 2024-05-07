@@ -1,13 +1,15 @@
 """Inference server entry point."""
 
-from argparse import ArgumentParser, Namespace
+from argparse import ArgumentError, ArgumentParser, Namespace
 import asyncio
 import os
+from typing import List
 
-import torch
 from tornado.web import Application
 
-from handler.segment import load_pyannote, SegmentHandler
+from handler import segment
+from handler.segment import SegmentHandler
+from capability import CapabilitySet
 import util
 
 _logger = util.add_logger('infsrv')
@@ -20,16 +22,22 @@ def _parse_args() -> Namespace:
         prog='infsrv',
         description='Blobfish Inference Server')
 
+    def capability_list(value: str) -> List[str]:
+        items = value.split(',')
+        for item in items:
+            if item not in CapabilitySet.get().capabilities.keys():
+                raise ArgumentError(
+                    'capabilities', f"unknown capability '{item}'")
+        return items
+
     parser.add_argument('-l', '--log-level',
                         default=env('LOG_LEVEL', 'INFO'))
-    parser.add_argument('--pyannote-model',
-                        default=env('PYANNOTE_MODEL',
-                                    'model/pyannote/config-3.0.yaml'))
+    parser.add_argument('-c', '--capabilities', type=capability_list,
+                        default=env('CAPABILITIES', 'pyannote30'))
     parser.add_argument('-a', '--server-address',
                         default=env('SERVER_ADDRESS', '127.0.0.1'))
     parser.add_argument('-p', '--server-port',
                         default=env('SERVER_PORT', '80'))
-    parser.add_argument('--torch-device', default=env('TORCH_DEVICE', 'cpu'))
 
     return parser.parse_args()
 
@@ -47,9 +55,8 @@ async def main() -> None:
     util.setup_logging(args.log_level)
     _logger.info('starting infsrv with args %s', vars(args))
 
-    torch.set_default_device(args.torch_device)
-    load_pyannote(args.pyannote_model, args.torch_device)
-    _logger.info('loaded models')
+    segment.init(args.capabilities)
+    _logger.info('initialized modules')
 
     app = _make_web_app()
     app.listen(args.server_port, args.server_address)
