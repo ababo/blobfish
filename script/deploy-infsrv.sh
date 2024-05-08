@@ -39,6 +39,7 @@ apt-get install -y \
 ssh root@$SSH_ADDRESS '
 pip install --break-system-packages \
     dataclasses_json \
+    faster-whisper \
     onnxruntime \
     pyannote-audio \
     tornado
@@ -73,6 +74,7 @@ Environment="LOG_LEVEL=$LOG_LEVEL"
 Environment="SERVER_ADDRESS=$SERVER_ADDRESS"
 Environment="SERVER_PORT=$SERVER_PORT"
 ExecStart=python3 infsrv
+Restart=on-failure
 WorkingDirectory=/root/blobfish
 
 [Install]
@@ -83,3 +85,11 @@ EOF
 ssh root@$SSH_ADDRESS 'systemctl daemon-reload'
 ssh root@$SSH_ADDRESS 'systemctl start blobfish-infsrv'
 ssh root@$SSH_ADDRESS 'systemctl enable blobfish-infsrv'
+
+sleep 60 # Give it some time to start.
+if ssh root@$SSH_ADDRESS 'systemctl -q is-active blobfish-infsrv'; then
+    echo "failed to start infsrv"
+    exit 1
+else
+    echo "started infsrv"
+fi

@@ -1,17 +1,17 @@
 """Speech segmentation logic."""
 
-from typing import Callable, Iterable, List, Tuple
+from typing import Awaitable, Callable, Iterable, List, Tuple
 
 
 class ChunkDivider: # pylint: disable=too-few-public-methods
     """Splits incoming byte chunks into fixed-size parts."""
 
-    def __init__(self, length: int, callback: Callable[[bytes], None]) -> None:
+    def __init__(self, length: int, callback: Callable[[bytes], Awaitable[None]]) -> None:
         self._buffer = bytearray(length)
         self._callback = callback
         self._index = 0
 
-    def add(self, chunk: bytes | bytearray) -> None:
+    async def add(self, chunk: bytes | bytearray) -> None:
         """Process a new chunk.
         This method might call the given callback one or more times.
         """
@@ -19,7 +19,7 @@ class ChunkDivider: # pylint: disable=too-few-public-methods
             extent = len(self._buffer) - self._index
             self._buffer[self._index:] = chunk[:extent]
             self._index = 0
-            self._callback(bytes(self._buffer))
+            await self._callback(bytes(self._buffer))
             chunk = chunk[extent:]
 
         self._buffer[self._index:self._index+len(chunk)] = chunk

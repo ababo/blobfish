@@ -2,17 +2,19 @@
 
 from http import HTTPStatus
 import json
-from typing import Any, Dict, List, Tuple
+from typing import Dict, List, Tuple
 
 from pyannote.audio import Pipeline
 from pyannote.core.annotation import Annotation, Segment
 from pyannote.core.utils.types import TrackName
 import torch
-from tornado.httputil import HTTPServerRequest
-from tornado.web import Application, HTTPError
 from tornado.websocket import WebSocketHandler
 
 from capability import CapabilitySet
+from handler import (
+    CONTENT_TYPE_HEADER,
+    find_request_capability, run_sync_task
+)
 from segment import ChunkDivider, SegmentProducer
 import util
 
@@ -30,55 +32,49 @@ def init(capabilities: List[str]) -> None:
         module_capabilities('handler/segment')
     for name, capability in module_capabilities.items():
         if name in capabilities:
-            pipeline = Pipeline.from_pretrained(capability.model_conf)
-            pipeline.to(torch.device(capability.torch_device))
+            pipeline = Pipeline.from_pretrained(capability.model_load_path)
+            pipeline.to(torch.device(capability.compute_device))
             _pyannote_pipelines[name] = pipeline
 
 
 class SegmentHandler(WebSocketHandler):  # pylint: disable=abstract-method
     """Websocket handler for realtime audio segmentation."""
 
-    def __init__(
-        self,
-        application: Application,
-        request: HTTPServerRequest,
-        **kwargs: Any
-    ) -> None:
-        WebSocketHandler.__init__(self, application, request, **kwargs)
+    _num_channels: int
+    _sample_rate: int
+    _sample_type: str
+    _window_duration: int
+    _pyannote_pipeline: Pipeline
+    _chunk_divider: ChunkDivider
+    _segment_producer: SegmentProducer
 
-        self._setup_request_params()
-
-        window_buffer_len = self._window_duration * self._num_channels * \
-            self._sample_rate * _SAMPLE_SIZES[self._sample_type] // 1000
-        self._chunk_divider = ChunkDivider(
-            window_buffer_len, self._process_window)
-
-        self._segment_producer = SegmentProducer(self._window_duration, 100)
-
-    def _setup_request_params(self):
+    def prepare(self) -> None:
         try:
             self._num_channels = int(self.get_query_argument('nc'))
             if self._num_channels < 1 or self._num_channels > 8:
                 raise ValueError
-        except:  # pylint: disable=raise-missing-from
-            raise HTTPError(HTTPStatus.BAD_REQUEST,
-                            'missing, malformed or unsupported '
-                            "'nc' (number of channels) query parameter")
+        except ValueError:
+            self.set_status(HTTPStatus.BAD_REQUEST)
+            self.finish('missing, malformed or unsupported '
+                        "'nc' (number of channels) query parameter")
+            return
 
         try:
             self._sample_rate = int(self.get_query_argument('sr'))
             if self._sample_rate < 8000 or self._sample_rate > 192000:
                 raise ValueError
-        except:  # pylint: disable=raise-missing-from
-            raise HTTPError(HTTPStatus.BAD_REQUEST,
-                            'missing, malformed or unsupported '
-                            "'sr' (sample rate) query parameter")
+        except ValueError:
+            self.set_status(HTTPStatus.BAD_REQUEST)
+            self.finish('missing, malformed or unsupported '
+                        "'sr' (sample rate) query parameter")
+            return
 
         self._sample_type = self.get_query_argument('st')
         if self._sample_type not in _SAMPLE_SIZES:
-            raise HTTPError(HTTPStatus.BAD_REQUEST,
-                            "missing or unknown 'st' (sample type) "
-                            "query parameter, expected 'i16', 'i32' or 'f32'")
+            self.set_status(HTTPStatus.BAD_REQUEST)
+            self.finish("missing or unknown 'st' (sample type) "
+                        "query parameter, expected 'i16', 'i32' or 'f32'")
+            return
 
         try:
             self._window_duration = int(
@@ -86,36 +82,48 @@ class SegmentHandler(WebSocketHandler):  # pylint: disable=abstract-method
             if self._window_duration < 1000 or \
                     self._window_duration > 10000:
                 raise ValueError
-        except:  # pylint: disable=raise-missing-from
-            raise HTTPError(HTTPStatus.BAD_REQUEST,
-                            "malformed or unsupported 'wd' "
-                            '(window duration msecs) query parameter')
+        except ValueError:
+            self.set_status(HTTPStatus.BAD_REQUEST)
+            self.finish("malformed or unsupported 'wd' "
+                        '(window duration msecs) query parameter')
+            return
 
-        capabilities = self.request.headers.get('BLOBFISH_CAPABILITIES')
-        capabilities = [] if capabilities is None else capabilities.split(',')
-        if len(capabilities) != 1 or \
-                capabilities[0] not in _pyannote_pipelines:
-            raise HTTPError(HTTPStatus.BAD_REQUEST,
-                            'missing, unknown or disabled capabilities, '
-                            'expected one in a BLOBFISH_CAPABILITIES header')
-        self._pyannote_pipeline = _pyannote_pipelines[capabilities[0]]
+        capability = find_request_capability(_pyannote_pipelines.keys(), self)
+        if capability is None:
+            return
+        self._pyannote_pipeline = _pyannote_pipelines[capability]
 
-        content_type = self.request.headers.get('Content-Type')
+        content_type = self.request.headers.get(CONTENT_TYPE_HEADER)
         if content_type != 'audio/lpcm':
-            raise HTTPError(HTTPStatus.BAD_REQUEST,
-                            "unsupported audio type, expected 'audio/lpcm'")
+            self.set_status(HTTPStatus.BAD_REQUEST)
+            self.finish("unsupported audio type, expected 'audio/lpcm'")
+            return
+
+        window_buffer_len = self._window_duration * self._num_channels * \
+            self._sample_rate * _SAMPLE_SIZES[self._sample_type] // 1000
+        self._chunk_divider = ChunkDivider(
+            window_buffer_len, self._chunk_divider_callback)
+
+        self._segment_producer = SegmentProducer(self._window_duration, 100)
+
+    async def _chunk_divider_callback(self, data) -> None:
+        segments = await run_sync_task(self._process_window, data)
+        for begin, end in segments:
+            _logger.debug('written segment %dms-%dms', begin, end)
+            await self.write_message(json.dumps({'begin': begin, 'end': end}) + '\n')
 
     def open(self, *_args: str, **_kwargs: str) -> None:
         _logger.debug('open /segment')
 
-    def on_message(self, message) -> None:
+    async def on_message(self, message) -> None:
+        # pylint: disable=invalid-overridden-method
         if isinstance(message, bytes):
-            self._chunk_divider.add(message)
+            await self._chunk_divider.add(message)
 
     def on_close(self) -> None:
         _logger.debug('on_close /segment')
 
-    def _process_window(self, data: bytes) -> None:
+    def _process_window(self, data: bytes) -> List[Tuple[int, int]]:
         dtype = _SAMPLE_DTYPES[self._sample_type]
         device = self._pyannote_pipeline.device
         waveform = torch.frombuffer(data, dtype=dtype).to(device)
@@ -128,12 +136,8 @@ class SegmentHandler(WebSocketHandler):  # pylint: disable=abstract-method
         audio = {'waveform': waveform, 'sample_rate': self._sample_rate}
         annotation: Annotation = self._pyannote_pipeline(audio)
 
-        segments = self._segment_producer.next_window(
+        return self._segment_producer.next_window(
             map(_track_to_interval, annotation.itertracks()))
-
-        for begin, end in segments:
-            _logger.debug('written segment %dms-%dms', begin, end)
-            self.write_message(json.dumps({'begin': begin, 'end': end}) + '\n')
 
 
 def _track_to_interval(track: Tuple[Segment, TrackName]) -> Tuple[int, int]:

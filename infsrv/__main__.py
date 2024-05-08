@@ -7,8 +7,9 @@ from typing import List
 
 from tornado.web import Application
 
-from handler import segment
+from handler import segment, transcribe
 from handler.segment import SegmentHandler
+from handler.transcribe import TranscribeHandler
 from capability import CapabilitySet
 import util
 
@@ -45,6 +46,7 @@ def _parse_args() -> Namespace:
 def _make_web_app() -> Application:
     return Application([
         (r"/segment", SegmentHandler),
+        (r"/transcribe", TranscribeHandler),
     ])
 
 
@@ -56,6 +58,7 @@ async def main() -> None:
     _logger.info('starting infsrv with args %s', vars(args))
 
     segment.init(args.capabilities)
+    transcribe.init(args.capabilities)
     _logger.info('initialized modules')
 
     app = _make_web_app()

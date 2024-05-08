@@ -5,6 +5,7 @@ name = "pypi"
 
 [packages]
 dataclasses-json = "*"
+faster-whisper = "*"
 onnxruntime = "*"
 pyannote-audio = "*"
 tornado = "*"
@@ -12,6 +13,7 @@ tornado = "*"
 [dev-packages]
 pylint = "*"
 pytest = "*"
+pytest-asyncio = "*"
 
 [requires]
 python_version = "3.11"

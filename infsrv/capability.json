@@ -1,21 +1,41 @@
 {
     "capabilities": {
         "segment-cpu": {
-            "modelConf": "model/pyannote-3.0/config.yaml",
+            "computeDevice": "cpu",
             "modelDirs": [
                 "model/pyannote-3.0",
                 "model/wespeaker"
             ],
-            "module": "handler/segment",
-            "torchDevice": "cpu"
+            "modelLoadPath": "model/pyannote-3.0/config.yaml",
+            "module": "handler/segment"
         },
         "segment-cuda": {
-            "modelConf": "model/pyannote-3.1/config.yaml",
+            "computeDevice": "cpu",
             "modelDirs": [
                 "model/pyannote-3.1"
             ],
-            "module": "handler/segment",
-            "torchDevice": "cuda"
+            "modelLoadPath": "model/pyannote-3.1/config.yaml",
+            "module": "handler/segment"
+        },
+        "transcribe-small-cpu": {
+            "beamSize": 5,
+            "computeDevice": "cpu",
+            "computeType": "int8",
+            "modelDirs": [
+                "model/whisper-small"
+            ],
+            "modelLoadPath": "model/whisper-small",
+            "module": "handler/transcribe"
+        },
+        "transcribe-small.en-cpu": {
+            "beamSize": 5,
+            "computeDevice": "cpu",
+            "computeType": "int8",
+            "modelDirs": [
+                "model/whisper-small.en"
+            ],
+            "modelLoadPath": "model/whisper-small.en",
+            "module": "handler/transcribe"
         }
     }
 }
