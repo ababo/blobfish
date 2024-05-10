@@ -1,25 +1,28 @@
-use crate::server::{middleware::Auth, Server, CAPABILITIES_HEADER};
+use crate::{
+    infsrv_pool::{Result as InfsrvResult, SegmentItem},
+    server::{middleware::Auth, Error, Result, Server},
+};
 use axum::{
     extract::{
         ws::{Message as AxumWsMessage, WebSocket as AxumWebSocket},
         State, WebSocketUpgrade,
     },
-    http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode},
-    response::{IntoResponse, Response},
+    http::{header::CONTENT_TYPE, HeaderMap, HeaderValue},
+    response::IntoResponse,
 };
 use futures::{
     stream::{SplitSink, SplitStream},
-    SinkExt, StreamExt, TryStreamExt,
+    StreamExt, TryStreamExt,
 };
 use hound::{SampleFormat, WavSpec, WavWriter};
 use log::debug;
 use ogg::reading::async_api::PacketReader;
 use rubato::{FastFixedIn, PolynomialDegree, Resampler};
-use serde::Deserialize;
 use std::{
     collections::VecDeque,
     io::{Cursor, Error as IoError, ErrorKind as IoErrorKind, Write},
     mem::swap,
+    result::Result as StdResult,
     sync::{Arc, Mutex},
 };
 use symphonia::{
@@ -30,16 +33,7 @@ use symphonia::{
     },
     default::codecs::VorbisDecoder,
 };
-use tokio::net::TcpStream;
-use tokio_tungstenite::{
-    connect_async,
-    tungstenite::{
-        client::IntoClientRequest, Message as TungsteniteMessage, Result as TungsteniteResult,
-    },
-    MaybeTlsStream, WebSocketStream,
-};
-
-type TungsteniteWebsocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+use tokio::sync::mpsc::{error::SendError, Receiver, Sender};
 
 const VORBIS_CONTENT_TYPE: &str = "audio/ogg; codecs=vorbis";
 
@@ -52,51 +46,31 @@ const SAMPLE_RATE: u32 = 16000;
 /// Handle transcribe requests.
 pub async fn handle_transcribe(
     State(server): State<Arc<Server>>,
-    _auth: Auth,
+    auth: Auth,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
-) -> Response {
+) -> Result<impl IntoResponse> {
     debug!("received transcribe request");
 
     if headers.get(CONTENT_TYPE) != Some(&HeaderValue::from_static(VORBIS_CONTENT_TYPE)) {
-        debug!("rejected to transcribe due to unsupported content type");
-        return (StatusCode::BAD_REQUEST, "unsupported content type").into_response();
+        return Err(Error::BadRequest("unsupported content type".to_owned()));
     }
 
-    let mut url = server.config.infsrv_url.clone();
-    url.query_pairs_mut()
-        .append_pair("nc", "1")
-        .append_pair("sr", &SAMPLE_RATE.to_string())
-        .append_pair("st", "i16");
+    let (infsrv_sender, infsrv_receiver) = server.infsrv_pool.segment(auth.user).await?;
 
-    let mut request = url.into_client_request().unwrap();
-    let headers = request.headers_mut();
-    // TODO: Retrieve capabilities dynamically.
-    headers.append(CAPABILITIES_HEADER, "segment-cpu".try_into().unwrap());
-    headers.append(CONTENT_TYPE, "audio/lpcm".try_into().unwrap());
-
-    let infsrv_ws = match connect_async(request).await {
-        Ok((wss, _)) => wss,
-        Err(err) => {
-            debug!("failed to connect to infsrv: {err:#}");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "failed to connect to inference server",
-            )
-                .into_response();
-        }
-    };
-
-    ws.on_upgrade(move |client_ws| async { ws_callback(server, client_ws, infsrv_ws).await })
+    Ok(ws.on_upgrade(move |client_ws| async {
+        ws_callback(server, infsrv_sender, infsrv_receiver, client_ws).await
+    }))
 }
 
 async fn ws_callback(
     server: Arc<Server>,
+    infsrv_sender: Sender<Vec<u8>>,
+    infsrv_receiver: Receiver<InfsrvResult<SegmentItem>>,
     client_ws: AxumWebSocket,
-    infsrv_ws: TungsteniteWebsocket,
 ) {
     let (client_sender, client_receiver) = client_ws.split();
-    let (infsrv_sender, infsrv_receiver) = infsrv_ws.split();
+
     let ring_buffer = Arc::new(RingBuffer::with_capacity(
         SAMPLE_RATE,
         RING_BUFFER_CAPACITY_MSECS,
@@ -116,7 +90,7 @@ async fn ws_callback(
 
     let mut processor = AudioStreamProcessor::new();
     processor
-        .process(server, client_receiver, infsrv_sender, ring_buffer.clone())
+        .process(server, infsrv_sender, client_receiver, ring_buffer.clone())
         .await;
 
     let _ = segment_handle.await;
@@ -126,25 +100,17 @@ async fn ws_callback(
 async fn process_segments(
     _server: Arc<Server>,
     mut _client_sender: SplitSink<AxumWebSocket, AxumWsMessage>,
-    mut infsrv_receiver: SplitStream<TungsteniteWebsocket>,
+    mut infsrv_receiver: Receiver<InfsrvResult<SegmentItem>>,
     ring_buffer: Arc<RingBuffer>,
 ) {
-    while let Some(Ok(TungsteniteMessage::Text(json))) = infsrv_receiver.next().await {
-        debug!("segment {}", json.trim());
+    while let Some(Ok(item)) = infsrv_receiver.recv().await {
+        debug!("read segment {}ms-{}ms", item.begin, item.end);
 
-        #[derive(Deserialize)]
-        struct Segment {
-            begin: u32,
-            end: u32,
-        }
-        let segment: Segment = serde_json::from_str(&json).unwrap();
-        debug!("read segment {}ms-{}ms", segment.begin, segment.end);
-
-        let wav = ring_buffer.extract_interval_wav(segment.begin, segment.end);
+        let wav = ring_buffer.extract_interval_wav(item.begin, item.end);
 
         std::fs::File::create_new(format!(
             "/Users/ababo/Desktop/{}-{}.wav",
-            segment.begin, segment.end
+            item.begin, item.end
         ))
         .unwrap()
         .write_all(&wav)
@@ -170,8 +136,8 @@ impl AudioStreamProcessor {
     pub async fn process(
         &mut self,
         _server: Arc<Server>,
+        infsrv_sender: Sender<Vec<u8>>,
         client_receiver: SplitStream<AxumWebSocket>,
-        mut infsrv_sender: SplitSink<TungsteniteWebsocket, TungsteniteMessage>,
         ring_buffer: Arc<RingBuffer>,
     ) {
         let data_reader = Box::pin(client_receiver.into_stream().filter_map(|msg| async {
@@ -229,7 +195,7 @@ impl AudioStreamProcessor {
                         return;
                     };
                     if let Err(err) = self
-                        .process_audio_buffer(&mut infsrv_sender, &ring_buffer, buf_f32.as_ref())
+                        .process_audio_buffer(&infsrv_sender, &ring_buffer, buf_f32.as_ref())
                         .await
                     {
                         debug!("failed to process audio buffer: {err:#}");
@@ -239,28 +205,26 @@ impl AudioStreamProcessor {
             }
             packet_index += 1;
         }
-
-        let _ = infsrv_sender.close().await;
     }
 
     async fn process_audio_buffer(
         &mut self,
-        infsrv_sender: &mut SplitSink<TungsteniteWebsocket, TungsteniteMessage>,
+        infsrv_sender: &Sender<Vec<u8>>,
         ring_buffer: &RingBuffer,
         audio_buffer: &AudioBuffer<f32>,
-    ) -> TungsteniteResult<()> {
+    ) -> StdResult<(), SendError<Vec<u8>>> {
         self.merge_channels(audio_buffer);
         self.resample(audio_buffer.spec().rate);
 
-        let mut data = Vec::with_capacity(2 * self.resampled.len());
+        let mut pcm = Vec::with_capacity(2 * self.resampled.len());
 
         for f32 in &self.resampled {
             let i16 = (*f32 * i16::MAX as f32) as i16;
-            data.extend_from_slice(&i16.to_le_bytes());
+            pcm.extend_from_slice(&i16.to_le_bytes());
             ring_buffer.push(i16);
         }
 
-        infsrv_sender.send(TungsteniteMessage::binary(data)).await
+        infsrv_sender.send(pcm).await
     }
 
     fn merge_channels(&mut self, audio_buffer: &AudioBuffer<f32>) {

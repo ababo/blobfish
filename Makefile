@@ -6,7 +6,6 @@ lint-infsrv:
 
 .PHONY: run-bfsrv
 run-bfsrv:
-	INFSRV_URL=ws://127.0.0.1:8001/segment \
 	RUST_LOG=debug \
 	SERVER_ADDRESS=127.0.0.1:8000 \
 	cargo run --release

@@ -1,8 +1,10 @@
 mod config;
+mod infsrv_pool;
 mod server;
 
 use crate::config::Config;
 use clap::Parser;
+use infsrv_pool::InfsrvPool;
 use server::Server;
 use std::{future::Future, sync::Arc};
 
@@ -22,7 +24,7 @@ async fn main() {
 async fn run(config: Arc<Config>) -> Result<()> {
     env_logger::init();
 
-    let server = Arc::new(Server::new(config.clone()));
+    let server = Arc::new(Server::new(config.clone(), InfsrvPool::new()));
     let server_handle = tokio::spawn(async move {
         server
             .serve(&config.server_address, shutdown_signal())

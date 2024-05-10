@@ -1,21 +1,50 @@
 mod middleware;
 mod transcribe;
 
-use crate::config::Config;
-use axum::{routing::get, Router};
+use crate::{
+    config::Config,
+    infsrv_pool::{self, InfsrvPool},
+};
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::get,
+    Router,
+};
 use log::info;
 use std::{future::Future, net::SocketAddr, sync::Arc};
-
-/// Request capabilities header name.
-pub const CAPABILITIES_HEADER: &str = "X-Blobfish-Capabilities";
 
 /// Server error.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("axum: {0}")]
     Axum(#[from] axum::Error),
+    #[error("bad request: {0}")]
+    BadRequest(String),
+    #[error("infsrv pool: {0}")]
+    InfsrvPool(#[from] infsrv_pool::Error),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+}
+
+impl IntoResponse for Error {
+    fn into_response(self) -> Response {
+        use Error::*;
+        let status = match &self {
+            Axum(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            BadRequest(_) => StatusCode::BAD_REQUEST,
+            InfsrvPool(err) => {
+                use infsrv_pool::Error::*;
+                match err {
+                    Internal | Tungstanite(_) => StatusCode::INTERNAL_SERVER_ERROR,
+                }
+            }
+            Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+
+        // TODO: Support error codes.
+        (status, self.to_string()).into_response()
+    }
 }
 
 /// Server result.
@@ -23,13 +52,17 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// HTTP/WS server for Handler.
 pub struct Server {
-    config: Arc<Config>,
+    _config: Arc<Config>,
+    infsrv_pool: InfsrvPool,
 }
 
 impl Server {
     /// Create a new Server instance.
-    pub fn new(config: Arc<Config>) -> Server {
-        Server { config }
+    pub fn new(_config: Arc<Config>, infsrv_pool: InfsrvPool) -> Self {
+        Self {
+            _config,
+            infsrv_pool,
+        }
     }
 
     /// Serve HTTP/WS requests with graceful shutdown on a given signal.

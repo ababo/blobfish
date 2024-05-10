@@ -5,9 +5,12 @@ use axum::{
     http::{request::Parts, StatusCode},
 };
 use std::{result::Result as StdResult, sync::Arc};
+use uuid::Uuid;
 
 /// Authentication middleware.
-pub struct Auth {}
+pub struct Auth {
+    pub user: Uuid,
+}
 
 #[async_trait]
 impl FromRequestParts<Arc<Server>> for Auth {
@@ -17,6 +20,6 @@ impl FromRequestParts<Arc<Server>> for Auth {
         _parts: &mut Parts,
         _server: &Arc<Server>,
     ) -> StdResult<Self, Self::Rejection> {
-        Ok(Self {})
+        Ok(Self { user: Uuid::nil() })
     }
 }
