@@ -1,26 +1,27 @@
 use crate::{
-    infsrv_pool::{Result as InfsrvResult, SegmentItem},
+    infsrv_pool::{Result as InfsrvResult, SegmentItem, SAMPLE_RATE},
     server::{middleware::Auth, Error, Result, Server},
 };
 use axum::{
     extract::{
         ws::{Message as AxumWsMessage, WebSocket as AxumWebSocket},
-        State, WebSocketUpgrade,
+        Query, State, WebSocketUpgrade,
     },
     http::{header::CONTENT_TYPE, HeaderMap, HeaderValue},
     response::IntoResponse,
 };
 use futures::{
     stream::{SplitSink, SplitStream},
-    StreamExt, TryStreamExt,
+    SinkExt, StreamExt, TryStreamExt,
 };
 use hound::{SampleFormat, WavSpec, WavWriter};
-use log::debug;
+use log::{debug, error};
 use ogg::reading::async_api::PacketReader;
 use rubato::{FastFixedIn, PolynomialDegree, Resampler};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
-    io::{Cursor, Error as IoError, ErrorKind as IoErrorKind, Write},
+    io::{Cursor, Error as IoError, ErrorKind as IoErrorKind},
     mem::swap,
     result::Result as StdResult,
     sync::{Arc, Mutex},
@@ -40,13 +41,26 @@ const VORBIS_CONTENT_TYPE: &str = "audio/ogg; codecs=vorbis";
 /// Ring buffer capacity for keeping last audio segment.
 const RING_BUFFER_CAPACITY_MSECS: u32 = 30_000;
 
-/// Economical sample rate that is enough for speech recognition.
-const SAMPLE_RATE: u32 = 16000;
+/// Transcribe request query.
+#[derive(Deserialize)]
+pub struct TranscribeQuery {
+    pub tariff: String,
+    pub language: Option<String>,
+}
+
+/// Transcribe request output item.
+#[derive(Deserialize, Serialize)]
+pub struct TranscribeItem {
+    pub begin: u32,
+    pub end: u32,
+    pub text: String,
+}
 
 /// Handle transcribe requests.
 pub async fn handle_transcribe(
     State(server): State<Arc<Server>>,
     auth: Auth,
+    Query(query): Query<TranscribeQuery>,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Result<impl IntoResponse> {
@@ -59,12 +73,22 @@ pub async fn handle_transcribe(
     let (infsrv_sender, infsrv_receiver) = server.infsrv_pool.segment(auth.user).await?;
 
     Ok(ws.on_upgrade(move |client_ws| async {
-        ws_callback(server, infsrv_sender, infsrv_receiver, client_ws).await
+        ws_callback(
+            server,
+            auth,
+            query,
+            infsrv_sender,
+            infsrv_receiver,
+            client_ws,
+        )
+        .await
     }))
 }
 
 async fn ws_callback(
     server: Arc<Server>,
+    auth: Auth,
+    query: TranscribeQuery,
     infsrv_sender: Sender<Vec<u8>>,
     infsrv_receiver: Receiver<InfsrvResult<SegmentItem>>,
     client_ws: AxumWebSocket,
@@ -81,6 +105,9 @@ async fn ws_callback(
     let segment_handle = tokio::spawn(async move {
         process_segments(
             cloned_server,
+            auth,
+            query.tariff,
+            query.language,
             client_sender,
             infsrv_receiver,
             cloned_ring_buffer,
@@ -98,24 +125,54 @@ async fn ws_callback(
 }
 
 async fn process_segments(
-    _server: Arc<Server>,
-    mut _client_sender: SplitSink<AxumWebSocket, AxumWsMessage>,
+    server: Arc<Server>,
+    auth: Auth,
+    tariff: String,
+    language: Option<String>,
+    mut client_sender: SplitSink<AxumWebSocket, AxumWsMessage>,
     mut infsrv_receiver: Receiver<InfsrvResult<SegmentItem>>,
     ring_buffer: Arc<RingBuffer>,
 ) {
-    while let Some(Ok(item)) = infsrv_receiver.recv().await {
-        debug!("read segment {}ms-{}ms", item.begin, item.end);
+    let mut item = None;
+    while let Some(Ok(segment_item)) = infsrv_receiver.recv().await {
+        debug!(
+            "read segment {}ms-{}ms",
+            segment_item.begin, segment_item.end
+        );
 
-        let wav = ring_buffer.extract_interval_wav(item.begin, item.end);
+        let file = ring_buffer.extract_interval_wav(segment_item.begin, segment_item.end);
 
-        std::fs::File::create_new(format!(
-            "/Users/ababo/Desktop/{}-{}.wav",
-            item.begin, item.end
-        ))
-        .unwrap()
-        .write_all(&wav)
-        .unwrap();
+        let result = server
+            .infsrv_pool
+            .transcribe(
+                auth.user,
+                tariff.as_str(),
+                file,
+                language.as_ref().cloned(),
+                item.take().map(|s: TranscribeItem| s.text),
+            )
+            .await;
+
+        let transcribe_item = match result {
+            Ok(item) => item,
+            Err(err) => {
+                error!("failed to transcribe segment: {err:#}");
+                break;
+            }
+        };
+
+        item = Some(TranscribeItem {
+            begin: segment_item.begin,
+            end: segment_item.end,
+            text: transcribe_item.text,
+        });
+        let json = serde_json::to_string(&item).unwrap();
+        if let Err(err) = client_sender.send(AxumWsMessage::Text(json + "\n")).await {
+            debug!("failed to send to client ws: {err:#}");
+            break;
+        }
     }
+    // TODO: Find a way to close the connections here, for unknown reason it doesn't.
 }
 
 struct AudioStreamProcessor {

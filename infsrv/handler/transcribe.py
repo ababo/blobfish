@@ -80,7 +80,7 @@ class TranscribeHandler(RequestHandler):  # pylint: disable=abstract-method
                 temperature=temperature)
 
         segments, _ = await run_sync_task(task)
-        text = ' '.join(map(lambda s: s.text.strip(), segments))
+        text = ' '.join(map(lambda s: s.text, segments))
 
         self.set_header(CONTENT_TYPE_HEADER, CONTENT_TYPE_JSON)
         self.write(json.dumps({'text': text}, ensure_ascii=False))

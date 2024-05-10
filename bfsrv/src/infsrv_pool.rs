@@ -1,6 +1,10 @@
 use axum::http::header::CONTENT_TYPE;
 use futures::{SinkExt, StreamExt};
 use log::debug;
+use reqwest::{
+    multipart::{Form, Part},
+    Client,
+};
 use serde::Deserialize;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio_tungstenite::{
@@ -22,6 +26,10 @@ pub const SAMPLE_RATE: u32 = 16000;
 pub enum Error {
     #[error("internal")]
     Internal,
+    #[error("reqwest: {0}")]
+    Reqwest(#[from] reqwest::Error),
+    #[error("serde_json: {0}")]
+    SerdeJson(#[from] serde_json::Error),
     #[error("tungstanite: {0}")]
     Tungstanite(#[from] tokio_tungstenite::tungstenite::Error),
 }
@@ -34,6 +42,12 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct SegmentItem {
     pub begin: u32, // In milliseconds.
     pub end: u32,   // In milliseconds.
+}
+
+/// An item returned from speech transcription.
+#[derive(Deserialize)]
+pub struct TranscribeItem {
+    pub text: String,
 }
 
 /// Pool of infsrv instances.
@@ -116,5 +130,42 @@ impl InfsrvPool {
         });
 
         Ok((out_sender, in_receiver))
+    }
+
+    /// Transcribe a given audio blob.
+    pub async fn transcribe(
+        &self,
+        _user: Uuid,
+        _tariff: &str,
+        file: Vec<u8>,
+        language: Option<String>,
+        prompt: Option<String>,
+    ) -> Result<TranscribeItem> {
+        // TODO: Allocate URL and capabilities dynamically instead of hardcoding.
+        let url = Url::parse("http://127.0.0.1:8001/transcribe").unwrap();
+        let capabilities = ["transcribe-small-cpu"];
+
+        let mut form = Form::new()
+            .part("file", Part::bytes(file).file_name("a.wav"))
+            .text("temperature", "0");
+
+        if let Some(language) = language {
+            form = form.text("language", language);
+        }
+
+        if let Some(prompt) = prompt {
+            form = form.text("prompt", prompt);
+        }
+
+        let response = Client::default()
+            .post(url)
+            .header(CAPABILITIES_HEADER, capabilities.join(","))
+            .multipart(form)
+            .send()
+            .await?;
+
+        let text = response.text().await?;
+        let item = serde_json::from_str(&text)?;
+        Ok(item)
     }
 }

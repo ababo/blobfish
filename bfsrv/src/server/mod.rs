@@ -36,7 +36,9 @@ impl IntoResponse for Error {
             InfsrvPool(err) => {
                 use infsrv_pool::Error::*;
                 match err {
-                    Internal | Tungstanite(_) => StatusCode::INTERNAL_SERVER_ERROR,
+                    Internal | Reqwest(_) | SerdeJson(_) | Tungstanite(_) => {
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    }
                 }
             }
             Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
