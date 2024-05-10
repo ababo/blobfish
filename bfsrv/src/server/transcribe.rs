@@ -51,8 +51,8 @@ pub struct TranscribeQuery {
 /// Transcribe request output item.
 #[derive(Deserialize, Serialize)]
 pub struct TranscribeItem {
-    pub begin: u32,
-    pub end: u32,
+    pub begin: f32,
+    pub end: f32,
     pub text: String,
 }
 
@@ -140,14 +140,14 @@ async fn process_segments(
             segment_item.begin, segment_item.end
         );
 
-        let file = ring_buffer.extract_interval_wav(segment_item.begin, segment_item.end);
+        let wav_blob = ring_buffer.extract_interval_wav(segment_item.begin, segment_item.end);
 
         let result = server
             .infsrv_pool
             .transcribe(
                 auth.user,
                 tariff.as_str(),
-                file,
+                wav_blob,
                 language.as_ref().cloned(),
                 item.take().map(|s: TranscribeItem| s.text),
             )
@@ -162,8 +162,8 @@ async fn process_segments(
         };
 
         item = Some(TranscribeItem {
-            begin: segment_item.begin,
-            end: segment_item.end,
+            begin: segment_item.begin as f32 / 1000.0,
+            end: segment_item.end as f32 / 1000.0,
             text: transcribe_item.text,
         });
         let json = serde_json::to_string(&item).unwrap();
@@ -172,7 +172,6 @@ async fn process_segments(
             break;
         }
     }
-    // TODO: Find a way to close the connections here, for unknown reason it doesn't.
 }
 
 struct AudioStreamProcessor {

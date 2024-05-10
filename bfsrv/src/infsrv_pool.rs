@@ -86,19 +86,34 @@ impl InfsrvPool {
         let (ws, _) = connect_async(request).await?;
         let (mut ws_sender, mut ws_receiver) = ws.split();
 
+        let (in_sender, in_receiver) = channel(1);
         let (out_sender, mut out_receiver) = channel(1);
+
+        // Some WS clients (e.g. websocat) ignore close-messages, so we must
+        // forcefully disconnect by closing ws_sender when in_receiver is destroyed.
+        let in_sender_cloned = in_sender.clone();
+
         tokio::spawn(async move {
-            while let Some(pcm) = out_receiver.recv().await {
-                if let Err(err) = ws_sender.send(Message::binary(pcm)).await {
-                    debug!("failed to send to websocket: {err:#}");
-                    break;
+            loop {
+                tokio::select! {
+                    _ = in_sender_cloned.closed() => {
+                        break;
+                    }
+                    maybe_pcm = out_receiver.recv() => {
+                        let Some(pcm) = maybe_pcm else {
+                            break;
+                        };
+                        if let Err(err) = ws_sender.send(Message::binary(pcm)).await {
+                            debug!("failed to send to websocket: {err:#}");
+                            break;
+                        }
+                    }
                 }
             }
             ws_sender.close().await
         });
 
         use Error::*;
-        let (in_sender, in_receiver) = channel(1);
         tokio::spawn(async move {
             while let Some(result) = ws_receiver.next().await {
                 match result {
@@ -132,12 +147,12 @@ impl InfsrvPool {
         Ok((out_sender, in_receiver))
     }
 
-    /// Transcribe a given audio blob.
+    /// Transcribe a given wav-blob.
     pub async fn transcribe(
         &self,
         _user: Uuid,
         _tariff: &str,
-        file: Vec<u8>,
+        wav_blob: Vec<u8>,
         language: Option<String>,
         prompt: Option<String>,
     ) -> Result<TranscribeItem> {
@@ -146,7 +161,7 @@ impl InfsrvPool {
         let capabilities = ["transcribe-small-cpu"];
 
         let mut form = Form::new()
-            .part("file", Part::bytes(file).file_name("a.wav"))
+            .part("file", Part::bytes(wav_blob).file_name("file.wav"))
             .text("temperature", "0");
 
         if let Some(language) = language {
