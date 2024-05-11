@@ -19,7 +19,7 @@ use uuid::Uuid;
 const CAPABILITIES_HEADER: &str = "X-Blobfish-Capabilities";
 
 /// Economical sample rate that is enough for speech recognition.
-pub const SAMPLE_RATE: u32 = 16000;
+pub const SAMPLE_RATE: f32 = 16000.0;
 
 /// InfsrvPool error.
 #[derive(Debug, thiserror::Error)]
@@ -40,8 +40,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// An item returned from speech segmentation stream.
 #[derive(Deserialize)]
 pub struct SegmentItem {
-    pub begin: u32, // In milliseconds.
-    pub end: u32,   // In milliseconds.
+    pub from: f32, // In secs.
+    pub to: f32,   // In secs.
 }
 
 /// An item returned from speech transcription.

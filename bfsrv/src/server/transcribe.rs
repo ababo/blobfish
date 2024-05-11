@@ -38,8 +38,8 @@ use tokio::sync::mpsc::{error::SendError, Receiver, Sender};
 
 const VORBIS_CONTENT_TYPE: &str = "audio/ogg; codecs=vorbis";
 
-/// Ring buffer capacity for keeping last audio segment.
-const RING_BUFFER_CAPACITY_MSECS: u32 = 30_000;
+/// Ring buffer time capacity for keeping last audio segment.
+const RING_BUFFER_CAPACITY: usize = (30.0 * SAMPLE_RATE) as usize;
 
 /// Transcribe request query.
 #[derive(Deserialize)]
@@ -51,8 +51,8 @@ pub struct TranscribeQuery {
 /// Transcribe request output item.
 #[derive(Deserialize, Serialize)]
 pub struct TranscribeItem {
-    pub begin: f32,
-    pub end: f32,
+    pub from: f32,
+    pub to: f32,
     pub text: String,
 }
 
@@ -95,10 +95,10 @@ async fn ws_callback(
 ) {
     let (client_sender, client_receiver) = client_ws.split();
 
-    let ring_buffer = Arc::new(RingBuffer::with_capacity(
+    let ring_buffer = Arc::new(Mutex::new(RingBuffer::with_capacity(
         SAMPLE_RATE,
-        RING_BUFFER_CAPACITY_MSECS,
-    ));
+        RING_BUFFER_CAPACITY,
+    )));
 
     let cloned_server = server.clone();
     let cloned_ring_buffer = ring_buffer.clone();
@@ -131,16 +131,16 @@ async fn process_segments(
     language: Option<String>,
     mut client_sender: SplitSink<AxumWebSocket, AxumWsMessage>,
     mut infsrv_receiver: Receiver<InfsrvResult<SegmentItem>>,
-    ring_buffer: Arc<RingBuffer>,
+    ring_buffer: Arc<Mutex<RingBuffer>>,
 ) {
     let mut item = None;
     while let Some(Ok(segment_item)) = infsrv_receiver.recv().await {
-        debug!(
-            "read segment {}ms-{}ms",
-            segment_item.begin, segment_item.end
-        );
+        debug!("read segment {}s-{}s", segment_item.from, segment_item.to);
 
-        let wav_blob = ring_buffer.extract_interval_wav(segment_item.begin, segment_item.end);
+        let wav_blob = ring_buffer
+            .lock()
+            .unwrap()
+            .extract_time_interval_wav(segment_item.from, segment_item.to);
 
         let result = server
             .infsrv_pool
@@ -162,8 +162,8 @@ async fn process_segments(
         };
 
         item = Some(TranscribeItem {
-            begin: segment_item.begin as f32 / 1000.0,
-            end: segment_item.end as f32 / 1000.0,
+            from: segment_item.from,
+            to: segment_item.to,
             text: transcribe_item.text,
         });
         let json = serde_json::to_string(&item).unwrap();
@@ -194,7 +194,7 @@ impl AudioStreamProcessor {
         _server: Arc<Server>,
         infsrv_sender: Sender<Vec<u8>>,
         client_receiver: SplitStream<AxumWebSocket>,
-        ring_buffer: Arc<RingBuffer>,
+        ring_buffer: Arc<Mutex<RingBuffer>>,
     ) {
         let data_reader = Box::pin(client_receiver.into_stream().filter_map(|msg| async {
             match msg {
@@ -266,18 +266,22 @@ impl AudioStreamProcessor {
     async fn process_audio_buffer(
         &mut self,
         infsrv_sender: &Sender<Vec<u8>>,
-        ring_buffer: &RingBuffer,
+        ring_buffer: &Mutex<RingBuffer>,
         audio_buffer: &AudioBuffer<f32>,
     ) -> StdResult<(), SendError<Vec<u8>>> {
         self.merge_channels(audio_buffer);
-        self.resample(audio_buffer.spec().rate);
-
-        ring_buffer.push(&self.resampled);
+        self.resample(audio_buffer.spec().rate as f32);
 
         let mut pcm = Vec::with_capacity(2 * self.resampled.len());
-        for sample in &self.resampled {
-            pcm.extend_from_slice(&to_i16(*sample).to_le_bytes());
+        {
+            let mut guard = ring_buffer.lock().unwrap();
+            for f32_sample in &self.resampled {
+                let i16_sample = (*f32_sample * i16::MAX as f32) as i16;
+                pcm.extend_from_slice(&i16_sample.to_le_bytes());
+                guard.push(i16_sample);
+            }
         }
+
         infsrv_sender.send(pcm).await
     }
 
@@ -295,7 +299,7 @@ impl AudioStreamProcessor {
         }
     }
 
-    fn resample(&mut self, sample_rate: u32) {
+    fn resample(&mut self, sample_rate: f32) {
         if sample_rate != SAMPLE_RATE {
             const CHUNK_SIZE: usize = 1024;
             if self.resampler.is_none() {
@@ -312,7 +316,7 @@ impl AudioStreamProcessor {
             }
 
             const OUTPUT_MARGIN: usize = 10;
-            let ratio = SAMPLE_RATE as f32 / sample_rate as f32;
+            let ratio = SAMPLE_RATE/ sample_rate;
             self.resampled.resize(
                 (self.merged.len() as f32 * ratio) as usize + OUTPUT_MARGIN,
                 0.0,
@@ -347,66 +351,56 @@ impl AudioStreamProcessor {
 }
 
 struct RingBuffer {
-    sample_rate: u32,
-    contents: Mutex<(VecDeque<i16>, usize)>,
+    sample_rate: f32,
+    deque: VecDeque<i16>,
+    pushed: usize,
 }
 
 impl RingBuffer {
-    fn with_capacity(sample_rate: u32, capacity_msecs: u32) -> Self {
-        let deque = VecDeque::with_capacity((sample_rate / 1000 * capacity_msecs) as usize);
+    fn with_capacity(sample_rate: f32, capacity: usize) -> Self {
         Self {
             sample_rate,
-            contents: Mutex::new((deque, 0)),
+            deque: VecDeque::with_capacity(capacity),
+            pushed: 0,
         }
     }
 
-    fn push(&self, samples: &[f32]) {
-        let mut contents = self.contents.lock().unwrap();
-        for sample in samples {
-            if contents.0.len() == contents.0.capacity() {
-                contents.0.pop_front();
-            }
-            contents.0.push_back(to_i16(*sample));
+    #[inline]
+    fn push(&mut self, sample: i16) {
+        if self.deque.len() == self.deque.capacity() {
+            self.deque.pop_front();
         }
-        contents.1 += samples.len();
+        self.deque.push_back(sample);
+        self.pushed += 1;
     }
 
-    /// Extract a given interval as WAV data.
-    fn extract_interval_wav(&self, begin: u32, end: u32) -> Vec<u8> {
-        let contents = self.contents.lock().unwrap();
-
-        let frame_offset = contents.1 - contents.0.len();
-        let msec_samples = self.sample_rate as usize / 1000;
-
-        let get_index = |msecs| {
-            ((msecs as usize * msec_samples).max(frame_offset) - frame_offset)
-                .min(contents.0.len() - 1)
+    fn extract_time_interval_wav(&self, from: f32, to: f32) -> Vec<u8> {
+        let frame_offset = self.pushed - self.deque.len();
+        let get_index = |time| {
+            (((time * self.sample_rate) as usize).max(frame_offset) - frame_offset)
+                .min(self.deque.len() - 1)
         };
 
         const WAV_HEADER_SIZE: usize = 44;
-        let (from_index, to_index) = (get_index(begin), get_index(end));
+        let (from_index, to_index) = (get_index(from), get_index(to));
+        dbg!(self.sample_rate, frame_offset, from_index, to_index);
         let capacity = WAV_HEADER_SIZE + (to_index - from_index) * 2;
         let mut data = Vec::with_capacity(capacity);
 
         let spec = WavSpec {
             channels: 1,
-            sample_rate: self.sample_rate,
+            sample_rate: self.sample_rate as u32,
             bits_per_sample: 16,
             sample_format: SampleFormat::Int,
         };
         let mut writer = WavWriter::new(Cursor::new(&mut data), spec).unwrap();
 
         for i in from_index..to_index {
-            writer.write_sample(contents.0[i]).unwrap();
+            writer.write_sample(self.deque[i]).unwrap();
         }
 
         writer.finalize().unwrap();
         assert_eq!(data.len(), capacity);
         data
     }
-}
-
-#[inline]
-fn to_i16(sample: f32) -> i16 {
-    (sample * i16::MAX as f32) as i16
 }

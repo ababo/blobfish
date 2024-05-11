@@ -41,9 +41,9 @@ class SegmentHandler(WebSocketHandler):  # pylint: disable=abstract-method
     """Websocket handler for realtime audio segmentation."""
 
     _num_channels: int
-    _sample_rate: int
+    _sample_rate: float
     _sample_type: str
-    _window_duration: int
+    _window_duration: float
     _pyannote_pipeline: Pipeline
     _chunk_divider: ChunkDivider
     _segment_producer: SegmentProducer
@@ -60,7 +60,7 @@ class SegmentHandler(WebSocketHandler):  # pylint: disable=abstract-method
             return
 
         try:
-            self._sample_rate = int(self.get_query_argument('sr'))
+            self._sample_rate = float(self.get_query_argument('sr'))
             if self._sample_rate < 8000 or self._sample_rate > 192000:
                 raise ValueError
         except ValueError:
@@ -77,15 +77,13 @@ class SegmentHandler(WebSocketHandler):  # pylint: disable=abstract-method
             return
 
         try:
-            self._window_duration = int(
-                self.get_query_argument('wd', '5000'))
-            if self._window_duration < 1000 or \
-                    self._window_duration > 10000:
+            self._window_duration = float(self.get_query_argument('wd', '5'))
+            if self._window_duration < 1 or self._window_duration > 10:
                 raise ValueError
         except ValueError:
             self.set_status(HTTPStatus.BAD_REQUEST)
             self.finish("malformed or unsupported 'wd' "
-                        '(window duration msecs) query parameter')
+                        '(window duration secs) query parameter')
             return
 
         capability = find_request_capability(_pyannote_pipelines.keys(), self)
@@ -99,18 +97,18 @@ class SegmentHandler(WebSocketHandler):  # pylint: disable=abstract-method
             self.finish("unsupported audio type, expected 'audio/lpcm'")
             return
 
-        window_buffer_len = self._window_duration * self._num_channels * \
-            self._sample_rate * _SAMPLE_SIZES[self._sample_type] // 1000
+        window_buffer_len = int(self._window_duration * self._num_channels * \
+            self._sample_rate * _SAMPLE_SIZES[self._sample_type])
         self._chunk_divider = ChunkDivider(
             window_buffer_len, self._chunk_divider_callback)
 
-        self._segment_producer = SegmentProducer(self._window_duration, 100)
+        self._segment_producer = SegmentProducer(self._window_duration, 0.1)
 
     async def _chunk_divider_callback(self, data) -> None:
         segments = await run_sync_task(self._process_window, data)
         for begin, end in segments:
-            _logger.debug('written segment %dms-%dms', begin, end)
-            await self.write_message(json.dumps({'begin': begin, 'end': end}) + '\n')
+            _logger.debug('written segment %ds-%ds', begin, end)
+            await self.write_message(json.dumps({'from': begin, 'to': end}) + '\n')
 
     def open(self, *_args: str, **_kwargs: str) -> None:
         _logger.debug('open /segment')
@@ -137,8 +135,4 @@ class SegmentHandler(WebSocketHandler):  # pylint: disable=abstract-method
         annotation: Annotation = self._pyannote_pipeline(audio)
 
         return self._segment_producer.next_window(
-            map(_track_to_interval, annotation.itertracks()))
-
-
-def _track_to_interval(track: Tuple[Segment, TrackName]) -> Tuple[int, int]:
-    return (int(track[0].start * 1000), int(track[0].end * 1000))
+            map(lambda t: (t[0].start, t[0].end), annotation.itertracks()))

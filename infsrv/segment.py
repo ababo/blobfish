@@ -29,7 +29,7 @@ class ChunkDivider: # pylint: disable=too-few-public-methods
 class SegmentProducer: # pylint: disable=too-few-public-methods
     """Converts in-window intervals into continuous time segments."""
 
-    def __init__(self, window_duration: int, time_epsilon: int) -> None:
+    def __init__(self, window_duration: float, time_epsilon: float) -> None:
         self._window_duration = window_duration
         self._time_epsilon = time_epsilon
         self._trailing_begin = None
@@ -37,8 +37,8 @@ class SegmentProducer: # pylint: disable=too-few-public-methods
 
     def next_window(
         self,
-        intervals: Iterable[Tuple[int, int]]
-    ) -> List[Tuple[int, int]]:
+        intervals: Iterable[Tuple[float, float]]
+    ) -> List[Tuple[float, float]]:
         """Add next window intervals and return next ready-made segments."""
         segments = []
         for begin, end in intervals:
