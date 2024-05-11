@@ -272,14 +272,12 @@ impl AudioStreamProcessor {
         self.merge_channels(audio_buffer);
         self.resample(audio_buffer.spec().rate);
 
+        ring_buffer.push(&self.resampled);
+
         let mut pcm = Vec::with_capacity(2 * self.resampled.len());
-
-        for f32 in &self.resampled {
-            let i16 = (*f32 * i16::MAX as f32) as i16;
-            pcm.extend_from_slice(&i16.to_le_bytes());
-            ring_buffer.push(i16);
+        for sample in &self.resampled {
+            pcm.extend_from_slice(&to_i16(*sample).to_le_bytes());
         }
-
         infsrv_sender.send(pcm).await
     }
 
@@ -362,13 +360,15 @@ impl RingBuffer {
         }
     }
 
-    fn push(&self, sample: i16) {
+    fn push(&self, samples: &[f32]) {
         let mut contents = self.contents.lock().unwrap();
-        if contents.0.len() == contents.0.capacity() {
-            contents.0.pop_front();
+        for sample in samples {
+            if contents.0.len() == contents.0.capacity() {
+                contents.0.pop_front();
+            }
+            contents.0.push_back(to_i16(*sample));
         }
-        contents.0.push_back(sample);
-        contents.1 += 1;
+        contents.1 += samples.len();
     }
 
     /// Extract a given interval as WAV data.
@@ -404,4 +404,9 @@ impl RingBuffer {
         assert_eq!(data.len(), capacity);
         data
     }
+}
+
+#[inline]
+fn to_i16(sample: f32) -> i16 {
+    (sample * i16::MAX as f32) as i16
 }
