@@ -2,11 +2,10 @@
 
 from http import HTTPStatus
 import json
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 from pyannote.audio import Pipeline
-from pyannote.core.annotation import Annotation, Segment
-from pyannote.core.utils.types import TrackName
+from pyannote.core.annotation import Annotation
 import torch
 from tornado.websocket import WebSocketHandler
 
@@ -48,7 +47,17 @@ class SegmentHandler(WebSocketHandler):  # pylint: disable=abstract-method
     _chunk_divider: ChunkDivider
     _segment_producer: SegmentProducer
 
-    def prepare(self) -> None:
+    def prepare(self) -> None:  # pylint: disable=too-many-return-statements
+        try:
+            max_speech_duration = float(self.get_query_argument('msd'))
+            if max_speech_duration < 10 or max_speech_duration > 90:
+                raise ValueError
+        except ValueError:
+            self.set_status(HTTPStatus.BAD_REQUEST)
+            self.finish('missing, malformed or unsupported '
+                        "'msd' (max speech duration) query parameter")
+            return
+
         try:
             self._num_channels = int(self.get_query_argument('nc'))
             if self._num_channels < 1 or self._num_channels > 8:
@@ -97,18 +106,24 @@ class SegmentHandler(WebSocketHandler):  # pylint: disable=abstract-method
             self.finish("unsupported audio type, expected 'audio/lpcm'")
             return
 
-        window_buffer_len = int(self._window_duration * self._num_channels * \
-            self._sample_rate * _SAMPLE_SIZES[self._sample_type])
+        window_buffer_len = int(self._window_duration * self._num_channels *
+                                self._sample_rate * _SAMPLE_SIZES[self._sample_type])
         self._chunk_divider = ChunkDivider(
             window_buffer_len, self._chunk_divider_callback)
 
-        self._segment_producer = SegmentProducer(self._window_duration, 0.1)
+        self._segment_producer = SegmentProducer(
+            self._window_duration, 0.1, max_speech_duration)
 
     async def _chunk_divider_callback(self, data) -> None:
-        segments = await run_sync_task(self._process_window, data)
-        for begin, end in segments:
-            _logger.debug('written segment %ds-%ds', begin, end)
-            await self.write_message(json.dumps({'from': begin, 'to': end}) + '\n')
+        annotation = await run_sync_task(self._annotate_window, data)
+
+        segments = self._segment_producer.next_window(
+            map(lambda t: (t[0].start, t[0].end), annotation.itertracks()))
+
+        for segment in segments:
+            _logger.debug('written %s segment %fs-%fs',
+                          segment.kind, segment.begin, segment.end)
+            await self.write_message(segment.to_json() + '\n')
 
     def open(self, *_args: str, **_kwargs: str) -> None:
         _logger.debug('open /segment')
@@ -121,7 +136,7 @@ class SegmentHandler(WebSocketHandler):  # pylint: disable=abstract-method
     def on_close(self) -> None:
         _logger.debug('on_close /segment')
 
-    def _process_window(self, data: bytes) -> List[Tuple[int, int]]:
+    def _annotate_window(self, data: bytes) -> Annotation:
         dtype = _SAMPLE_DTYPES[self._sample_type]
         device = self._pyannote_pipeline.device
         waveform = torch.frombuffer(data, dtype=dtype).to(device)
@@ -132,7 +147,4 @@ class SegmentHandler(WebSocketHandler):  # pylint: disable=abstract-method
             sample_size = _SAMPLE_SIZES[self._sample_type]
             waveform /= 2 ** (sample_size * 8 - 1) - 1
         audio = {'waveform': waveform, 'sample_rate': self._sample_rate}
-        annotation: Annotation = self._pyannote_pipeline(audio)
-
-        return self._segment_producer.next_window(
-            map(lambda t: (t[0].start, t[0].end), annotation.itertracks()))
+        return self._pyannote_pipeline(audio)

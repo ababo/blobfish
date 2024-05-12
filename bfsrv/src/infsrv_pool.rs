@@ -18,8 +18,13 @@ use uuid::Uuid;
 /// Request capabilities header name.
 const CAPABILITIES_HEADER: &str = "X-Blobfish-Capabilities";
 
+/// Max speech segment duration.
+pub const MAX_SEGMENT_DURATION: f32 = 30.0;
+
 /// Economical sample rate that is enough for speech recognition.
 pub const SAMPLE_RATE: f32 = 16000.0;
+
+const WINDOW_DURATION: f32 = 5.0;
 
 /// InfsrvPool error.
 #[derive(Debug, thiserror::Error)]
@@ -39,9 +44,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// An item returned from speech segmentation stream.
 #[derive(Deserialize)]
-pub struct SegmentItem {
-    pub from: f32, // In secs.
-    pub to: f32,   // In secs.
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum SegmentItem {
+    Speech { begin: f32, end: f32 },
+    Void { begin: f32, end: f32 },
 }
 
 /// An item returned from speech transcription.
@@ -71,9 +77,11 @@ impl InfsrvPool {
         let capabilities = ["segment-cpu"];
 
         url.query_pairs_mut()
+            .append_pair("msd", &(MAX_SEGMENT_DURATION - WINDOW_DURATION).to_string())
             .append_pair("nc", "1")
             .append_pair("sr", &SAMPLE_RATE.to_string())
-            .append_pair("st", "i16");
+            .append_pair("st", "i16")
+            .append_pair("wd", &WINDOW_DURATION.to_string());
 
         let mut request = url.into_client_request().unwrap();
         let headers = request.headers_mut();

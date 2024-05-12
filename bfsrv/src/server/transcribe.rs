@@ -1,5 +1,5 @@
 use crate::{
-    infsrv_pool::{Result as InfsrvResult, SegmentItem, SAMPLE_RATE},
+    infsrv_pool::{Result as InfsrvResult, SegmentItem, MAX_SEGMENT_DURATION, SAMPLE_RATE},
     server::{middleware::Auth, Error, Result, Server},
 };
 use axum::{
@@ -34,12 +34,12 @@ use symphonia::{
     },
     default::codecs::VorbisDecoder,
 };
-use tokio::sync::mpsc::{error::SendError, Receiver, Sender};
+use tokio::sync::mpsc::{channel, error::SendError, Receiver, Sender};
 
 const VORBIS_CONTENT_TYPE: &str = "audio/ogg; codecs=vorbis";
 
 /// Ring buffer time capacity for keeping last audio segment.
-const RING_BUFFER_CAPACITY: usize = (30.0 * SAMPLE_RATE) as usize;
+const RING_BUFFER_CAPACITY: usize = (MAX_SEGMENT_DURATION * SAMPLE_RATE) as usize;
 
 /// Transcribe request query.
 #[derive(Deserialize)]
@@ -51,8 +51,8 @@ pub struct TranscribeQuery {
 /// Transcribe request output item.
 #[derive(Deserialize, Serialize)]
 pub struct TranscribeItem {
-    pub from: f32,
-    pub to: f32,
+    pub begin: f32,
+    pub end: f32,
     pub text: String,
 }
 
@@ -100,24 +100,32 @@ async fn ws_callback(
         RING_BUFFER_CAPACITY,
     )));
 
+    let (limit_sender, limit_receiver) = channel::<f32>(10);
+
     let cloned_server = server.clone();
     let cloned_ring_buffer = ring_buffer.clone();
     let segment_handle = tokio::spawn(async move {
         process_segments(
             cloned_server,
             auth,
-            query.tariff,
-            query.language,
+            query,
             client_sender,
             infsrv_receiver,
             cloned_ring_buffer,
+            limit_sender,
         )
         .await;
     });
 
     let mut processor = AudioStreamProcessor::new();
     processor
-        .process(server, infsrv_sender, client_receiver, ring_buffer.clone())
+        .process(
+            server,
+            infsrv_sender,
+            client_receiver,
+            ring_buffer.clone(),
+            limit_receiver,
+        )
         .await;
 
     let _ = segment_handle.await;
@@ -127,28 +135,43 @@ async fn ws_callback(
 async fn process_segments(
     server: Arc<Server>,
     auth: Auth,
-    tariff: String,
-    language: Option<String>,
+    query: TranscribeQuery,
     mut client_sender: SplitSink<AxumWebSocket, AxumWsMessage>,
     mut infsrv_receiver: Receiver<InfsrvResult<SegmentItem>>,
     ring_buffer: Arc<Mutex<RingBuffer>>,
+    limit_sender: Sender<f32>,
 ) {
     let mut item = None;
     while let Some(Ok(segment_item)) = infsrv_receiver.recv().await {
-        debug!("read segment {}s-{}s", segment_item.from, segment_item.to);
+        use SegmentItem::*;
+        let (begin, end) = match segment_item {
+            Speech { begin, end } => (begin, end),
+            Void { begin: _, end } => {
+                if limit_sender.send(end).await.is_err() {
+                    break;
+                }
+                continue;
+            }
+        };
+
+        debug!("read speech segment {}s-{}s", begin, end);
 
         let wav_blob = ring_buffer
             .lock()
             .unwrap()
-            .extract_time_interval_wav(segment_item.from, segment_item.to);
+            .extract_time_interval_wav(begin, end);
+
+        if limit_sender.send(end).await.is_err() {
+            break;
+        }
 
         let result = server
             .infsrv_pool
             .transcribe(
                 auth.user,
-                tariff.as_str(),
+                query.tariff.as_str(),
                 wav_blob,
-                language.as_ref().cloned(),
+                query.language.as_ref().cloned(),
                 item.take().map(|s: TranscribeItem| s.text),
             )
             .await;
@@ -162,8 +185,8 @@ async fn process_segments(
         };
 
         item = Some(TranscribeItem {
-            from: segment_item.from,
-            to: segment_item.to,
+            begin,
+            end,
             text: transcribe_item.text,
         });
         let json = serde_json::to_string(&item).unwrap();
@@ -195,6 +218,7 @@ impl AudioStreamProcessor {
         infsrv_sender: Sender<Vec<u8>>,
         client_receiver: SplitStream<AxumWebSocket>,
         ring_buffer: Arc<Mutex<RingBuffer>>,
+        mut limit_receiver: Receiver<f32>,
     ) {
         let data_reader = Box::pin(client_receiver.into_stream().filter_map(|msg| async {
             match msg {
@@ -208,6 +232,7 @@ impl AudioStreamProcessor {
 
         let mut id_header = Vec::new();
         let mut decoder = None;
+        let mut frames_consumed = 0;
 
         let mut packet_index = 0;
         while let Some(Ok(mut packet)) = packet_reader.next().await {
@@ -251,7 +276,13 @@ impl AudioStreamProcessor {
                         return;
                     };
                     if let Err(err) = self
-                        .process_audio_buffer(&infsrv_sender, &ring_buffer, buf_f32.as_ref())
+                        .process_audio_buffer(
+                            &infsrv_sender,
+                            &ring_buffer,
+                            &mut limit_receiver,
+                            &mut frames_consumed,
+                            buf_f32.as_ref(),
+                        )
                         .await
                     {
                         debug!("failed to process audio buffer: {err:#}");
@@ -267,22 +298,43 @@ impl AudioStreamProcessor {
         &mut self,
         infsrv_sender: &Sender<Vec<u8>>,
         ring_buffer: &Mutex<RingBuffer>,
+        limit_receiver: &mut Receiver<f32>,
+        frames_consumed: &mut usize,
         audio_buffer: &AudioBuffer<f32>,
     ) -> StdResult<(), SendError<Vec<u8>>> {
         self.merge_channels(audio_buffer);
         self.resample(audio_buffer.spec().rate as f32);
 
-        let mut pcm = Vec::with_capacity(2 * self.resampled.len());
-        {
-            let mut guard = ring_buffer.lock().unwrap();
-            for f32_sample in &self.resampled {
-                let i16_sample = (*f32_sample * i16::MAX as f32) as i16;
-                pcm.extend_from_slice(&i16_sample.to_le_bytes());
-                guard.push(i16_sample);
+        let mut offset = 0;
+        while offset < self.resampled.len() {
+            let pushed = ring_buffer.lock().unwrap().pushed;
+            let chunk_len = (RING_BUFFER_CAPACITY - (pushed - *frames_consumed))
+                .min(self.resampled.len() - offset);
+
+            if chunk_len == 0 {
+                // Wait until more frames have been consumed before pushing.
+                let Some(time_consumed) = limit_receiver.recv().await else {
+                    // Probably is closing, let it shut down gracefully.
+                    return Ok(());
+                };
+                *frames_consumed = (time_consumed * SAMPLE_RATE) as usize;
+                continue;
             }
+
+            let mut pcm = Vec::with_capacity(2 * self.resampled.len());
+            {
+                let mut guard = ring_buffer.lock().unwrap();
+                for f32_sample in &self.resampled[offset..offset + chunk_len] {
+                    let i16_sample = (*f32_sample * i16::MAX as f32) as i16;
+                    pcm.extend_from_slice(&i16_sample.to_le_bytes());
+                    guard.push(i16_sample);
+                }
+            }
+            infsrv_sender.send(pcm).await?;
+            offset += chunk_len;
         }
 
-        infsrv_sender.send(pcm).await
+        Ok(())
     }
 
     fn merge_channels(&mut self, audio_buffer: &AudioBuffer<f32>) {
@@ -316,7 +368,7 @@ impl AudioStreamProcessor {
             }
 
             const OUTPUT_MARGIN: usize = 10;
-            let ratio = SAMPLE_RATE/ sample_rate;
+            let ratio = SAMPLE_RATE / sample_rate;
             self.resampled.resize(
                 (self.merged.len() as f32 * ratio) as usize + OUTPUT_MARGIN,
                 0.0,
@@ -374,7 +426,7 @@ impl RingBuffer {
         self.pushed += 1;
     }
 
-    fn extract_time_interval_wav(&self, from: f32, to: f32) -> Vec<u8> {
+    fn extract_time_interval_wav(&self, begin: f32, end: f32) -> Vec<u8> {
         let frame_offset = self.pushed - self.deque.len();
         let get_index = |time| {
             (((time * self.sample_rate) as usize).max(frame_offset) - frame_offset)
@@ -382,9 +434,8 @@ impl RingBuffer {
         };
 
         const WAV_HEADER_SIZE: usize = 44;
-        let (from_index, to_index) = (get_index(from), get_index(to));
-        dbg!(self.sample_rate, frame_offset, from_index, to_index);
-        let capacity = WAV_HEADER_SIZE + (to_index - from_index) * 2;
+        let (begin_index, end_index) = (get_index(begin), get_index(end));
+        let capacity = WAV_HEADER_SIZE + (end_index - begin_index) * 2;
         let mut data = Vec::with_capacity(capacity);
 
         let spec = WavSpec {
@@ -395,7 +446,7 @@ impl RingBuffer {
         };
         let mut writer = WavWriter::new(Cursor::new(&mut data), spec).unwrap();
 
-        for i in from_index..to_index {
+        for i in begin_index..end_index {
             writer.write_sample(self.deque[i]).unwrap();
         }
 
