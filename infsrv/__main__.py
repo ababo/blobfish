@@ -38,7 +38,7 @@ def _parse_args() -> Namespace:
     parser.add_argument('-a', '--server-address',
                         default=env('SERVER_ADDRESS', '127.0.0.1'))
     parser.add_argument('-p', '--server-port',
-                        default=env('SERVER_PORT', '80'))
+                        default=env('SERVER_PORT', '9322'))
 
     return parser.parse_args()
 

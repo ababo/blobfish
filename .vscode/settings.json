@@ -22,12 +22,14 @@
         "pyannote",
         "reqwest",
         "resampler",
+        "scandir",
         "thiserror",
         "torchaudio",
         "tungstanite",
         "Tungstenite",
         "vorbis",
         "websocat",
+        "websockets",
         "wespeaker"
     ]
 }

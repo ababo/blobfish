@@ -11,6 +11,7 @@ pyannote-audio = "*"
 tornado = "*"
 
 [dev-packages]
+nltk = "*"
 pylint = "*"
 pytest = "*"
 pytest-asyncio = "*"

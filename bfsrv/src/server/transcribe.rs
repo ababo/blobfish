@@ -4,7 +4,7 @@ use crate::{
 };
 use axum::{
     extract::{
-        ws::{Message as AxumWsMessage, WebSocket as AxumWebSocket},
+        ws::{Message, WebSocket},
         Query, State, WebSocketUpgrade,
     },
     http::{header::CONTENT_TYPE, HeaderMap, HeaderValue},
@@ -45,7 +45,7 @@ const RING_BUFFER_CAPACITY: usize = (MAX_SEGMENT_DURATION * SAMPLE_RATE) as usiz
 #[derive(Deserialize)]
 pub struct TranscribeQuery {
     pub tariff: String,
-    pub language: Option<String>,
+    pub lang: Option<String>,
 }
 
 /// Transcribe request output item.
@@ -91,7 +91,7 @@ async fn ws_callback(
     query: TranscribeQuery,
     infsrv_sender: Sender<Vec<u8>>,
     infsrv_receiver: Receiver<InfsrvResult<SegmentItem>>,
-    client_ws: AxumWebSocket,
+    client_ws: WebSocket,
 ) {
     let (client_sender, client_receiver) = client_ws.split();
 
@@ -136,7 +136,7 @@ async fn process_segments(
     server: Arc<Server>,
     auth: Auth,
     query: TranscribeQuery,
-    mut client_sender: SplitSink<AxumWebSocket, AxumWsMessage>,
+    mut client_sender: SplitSink<WebSocket, Message>,
     mut infsrv_receiver: Receiver<InfsrvResult<SegmentItem>>,
     ring_buffer: Arc<Mutex<RingBuffer>>,
     limit_sender: Sender<f32>,
@@ -171,7 +171,7 @@ async fn process_segments(
                 auth.user,
                 query.tariff.as_str(),
                 wav_blob,
-                query.language.as_ref().cloned(),
+                query.lang.as_ref().cloned(),
                 item.take().map(|s: TranscribeItem| s.text),
             )
             .await;
@@ -190,7 +190,7 @@ async fn process_segments(
             text: transcribe_item.text,
         });
         let json = serde_json::to_string(&item).unwrap();
-        if let Err(err) = client_sender.send(AxumWsMessage::Text(json + "\n")).await {
+        if let Err(err) = client_sender.send(Message::Text(json + "\n")).await {
             debug!("failed to send to client ws: {err:#}");
             break;
         }
@@ -216,13 +216,13 @@ impl AudioStreamProcessor {
         &mut self,
         _server: Arc<Server>,
         infsrv_sender: Sender<Vec<u8>>,
-        client_receiver: SplitStream<AxumWebSocket>,
+        client_receiver: SplitStream<WebSocket>,
         ring_buffer: Arc<Mutex<RingBuffer>>,
         mut limit_receiver: Receiver<f32>,
     ) {
         let data_reader = Box::pin(client_receiver.into_stream().filter_map(|msg| async {
             match msg {
-                Ok(AxumWsMessage::Binary(data)) => Some(Ok(data)),
+                Ok(Message::Binary(data)) => Some(Ok(data)),
                 Ok(_) => None,
                 Err(err) => Some(Err(IoError::new(IoErrorKind::Other, err))),
             }

@@ -73,7 +73,7 @@ impl InfsrvPool {
         _user: Uuid,
     ) -> Result<(Sender<Vec<u8>>, Receiver<Result<SegmentItem>>)> {
         // TODO: Allocate URL and capabilities dynamically instead of hardcoding.
-        let mut url = Url::parse("ws://127.0.0.1:8001/segment").unwrap();
+        let mut url = Url::parse("ws://127.0.0.1:9322/segment").unwrap();
         let capabilities = ["segment-cpu"];
 
         url.query_pairs_mut()
@@ -165,7 +165,7 @@ impl InfsrvPool {
         prompt: Option<String>,
     ) -> Result<TranscribeItem> {
         // TODO: Allocate URL and capabilities dynamically instead of hardcoding.
-        let url = Url::parse("http://127.0.0.1:8001/transcribe").unwrap();
+        let url = Url::parse("http://127.0.0.1:9322/transcribe").unwrap();
         let capabilities = ["transcribe-small-cpu"];
 
         let mut form = Form::new()

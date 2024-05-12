@@ -7,14 +7,12 @@ lint-infsrv:
 .PHONY: run-bfsrv
 run-bfsrv:
 	RUST_LOG=debug \
-	SERVER_ADDRESS=127.0.0.1:8000 \
 	cargo run --release
 
 .PHONY: run-infsrv
 run-infsrv:
 	CAPABILITIES=segment-cpu,transcribe-small-cpu \
 	LOG_LEVEL=debug \
-	SERVER_PORT=8001 \
 	python infsrv
 
 .PHONY: test-infsrv
