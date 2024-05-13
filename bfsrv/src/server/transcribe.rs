@@ -154,7 +154,7 @@ async fn process_segments(
             }
         };
 
-        debug!("read speech segment {}s-{}s", begin, end);
+        debug!("received speech segment {}s-{}s", begin, end);
 
         let wav_blob = ring_buffer
             .lock()

@@ -1,12 +1,13 @@
 """Miscellaneous utilities."""
 
 import logging
+import time
 
 _loggers: dict[str, logging.Logger] = {}
 
 
-_LOGGING_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
-_LOGGING_FORMAT = '%(asctime)s.%(msecs)03d %(levelname)s %(message)s'
+LOGGING_DATEFMT = '%Y-%m-%d %H:%M:%S'
+LOGGING_FMT = '%(asctime)s.%(msecs)03d %(levelname)s %(message)s'
 
 
 def add_logger(name: str) -> logging.Logger:
@@ -16,7 +17,8 @@ def add_logger(name: str) -> logging.Logger:
 
     handler = logging.StreamHandler()
     formatter = logging.Formatter(
-        datefmt=_LOGGING_DATE_FORMAT, fmt=_LOGGING_FORMAT)
+        datefmt=LOGGING_DATEFMT, fmt=LOGGING_FMT)
+    formatter.converter = time.gmtime
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     logger.propagate = False
@@ -29,7 +31,8 @@ def setup_logging(level: str) -> None:
     """Configure logging and set level."""
 
     level = level.upper()
-    logging.basicConfig(datefmt=_LOGGING_DATE_FORMAT,
-                        format=_LOGGING_FORMAT, level=level)
+    logging.basicConfig(datefmt=LOGGING_DATEFMT,
+                        format=LOGGING_FMT, level=level)
+    logging.Formatter.converter = time.gmtime
     for logger in _loggers.values():
         logger.setLevel(level)

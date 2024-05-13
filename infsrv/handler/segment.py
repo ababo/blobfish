@@ -1,18 +1,20 @@
 """Speech segmentation handler."""
 
+from dataclasses import dataclass
 from http import HTTPStatus
-import json
 from typing import Dict, List
 
+from fastapi import (
+    Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+)
 from pyannote.audio import Pipeline
 from pyannote.core.annotation import Annotation
 import torch
-from tornado.websocket import WebSocketHandler
+
 
 from capability import CapabilitySet
 from handler import (
-    CONTENT_TYPE_HEADER,
-    find_request_capability, run_sync_task
+    CAPABILITIES_HEADER, find_request_capability, run_sync_task
 )
 from segment import ChunkDivider, SegmentProducer
 import util
@@ -36,115 +38,111 @@ def init(capabilities: List[str]) -> None:
             _pyannote_pipelines[name] = pipeline
 
 
-class SegmentHandler(WebSocketHandler):  # pylint: disable=abstract-method
+@dataclass
+class _Context:
+    websocket: WebSocket
+    num_channels: int
+    sample_rate: float
+    sample_type: str
+    pipeline: Pipeline
+    segment_producer: SegmentProducer
+
+
+async def handle_segment(  # pylint: disable=too-many-arguments
+        websocket: WebSocket,
+        max_speech_duration: float = Query(..., alias='msd'),
+        num_channels: int = Query(..., alias='nc'),
+        sample_rate: float = Query(..., alias='sr'),
+        sample_type: str = Query(..., alias='st'),
+        window_duration: float = Query(alias='wd', default=5),
+        capabilities: str = Header(..., alias=CAPABILITIES_HEADER),
+        content_type: str = Header(...),
+) -> None:
     """Websocket handler for realtime audio segmentation."""
+    if max_speech_duration < 10 or max_speech_duration > 90:
+        raise HTTPException(
+            HTTPStatus.BAD_REQUEST,
+            'missing, malformed or unsupported '
+            "'msd' (max speech duration) query parameter")
 
-    _num_channels: int
-    _sample_rate: float
-    _sample_type: str
-    _window_duration: float
-    _pyannote_pipeline: Pipeline
-    _chunk_divider: ChunkDivider
-    _segment_producer: SegmentProducer
+    if num_channels < 1 or num_channels > 8:
+        raise HTTPException(
+            HTTPStatus.BAD_REQUEST,
+            'missing, malformed or unsupported '
+            "'nc' (number of channels) query parameter")
 
-    def prepare(self) -> None:  # pylint: disable=too-many-return-statements
+    if sample_rate < 8000 or sample_rate > 192000:
+        raise HTTPException(
+            HTTPStatus.BAD_REQUEST,
+            'missing, malformed or unsupported '
+            "'sr' (sample rate) query parameter")
+
+    if sample_type not in _SAMPLE_SIZES:
+        raise HTTPException(
+            HTTPStatus.BAD_REQUEST,
+            "missing or unknown 'st' (sample type) "
+            "query parameter, expected 'i16', 'i32' or 'f32'")
+
+    if window_duration < 1 or window_duration > 10:
+        raise HTTPException(
+            HTTPStatus.BAD_REQUEST,
+            "malformed or unsupported 'wd' "
+            '(window duration secs) query parameter')
+
+    capability = find_request_capability(
+        _pyannote_pipelines.keys(), capabilities)
+    pipeline = _pyannote_pipelines[capability]
+
+    if content_type != 'audio/lpcm':
+        raise HTTPException(
+            HTTPStatus.BAD_REQUEST,
+            "unsupported audio type, expected 'audio/lpcm'")
+
+    await websocket.accept()
+    _logger.debug('open /segment')
+
+    segment_producer = SegmentProducer(
+        window_duration, 0.1, max_speech_duration)
+    ctx = _Context(websocket, num_channels, sample_rate,
+                   sample_type, pipeline, segment_producer)
+
+    window_buffer_len = int(
+        window_duration * num_channels *
+        sample_rate * _SAMPLE_SIZES[sample_type])
+    chunk_divider = ChunkDivider(
+        window_buffer_len,
+        lambda data: _chunk_divider_callback(ctx, data))
+
+    while True:
         try:
-            max_speech_duration = float(self.get_query_argument('msd'))
-            if max_speech_duration < 10 or max_speech_duration > 90:
-                raise ValueError
-        except ValueError:
-            self.set_status(HTTPStatus.BAD_REQUEST)
-            self.finish('missing, malformed or unsupported '
-                        "'msd' (max speech duration) query parameter")
-            return
+            data = await websocket.receive_bytes()
+            await chunk_divider.add(data)
+        except WebSocketDisconnect:
+            _logger.debug('close /segment')
+            break
 
-        try:
-            self._num_channels = int(self.get_query_argument('nc'))
-            if self._num_channels < 1 or self._num_channels > 8:
-                raise ValueError
-        except ValueError:
-            self.set_status(HTTPStatus.BAD_REQUEST)
-            self.finish('missing, malformed or unsupported '
-                        "'nc' (number of channels) query parameter")
-            return
 
-        try:
-            self._sample_rate = float(self.get_query_argument('sr'))
-            if self._sample_rate < 8000 or self._sample_rate > 192000:
-                raise ValueError
-        except ValueError:
-            self.set_status(HTTPStatus.BAD_REQUEST)
-            self.finish('missing, malformed or unsupported '
-                        "'sr' (sample rate) query parameter")
-            return
+async def _chunk_divider_callback(ctx: _Context, data: bytes) -> None:
+    annotation = await run_sync_task(_annotate_window, ctx, data)
 
-        self._sample_type = self.get_query_argument('st')
-        if self._sample_type not in _SAMPLE_SIZES:
-            self.set_status(HTTPStatus.BAD_REQUEST)
-            self.finish("missing or unknown 'st' (sample type) "
-                        "query parameter, expected 'i16', 'i32' or 'f32'")
-            return
+    segments = ctx.segment_producer.next_window(
+        map(lambda t: (t[0].start, t[0].end), annotation.itertracks()))
 
-        try:
-            self._window_duration = float(self.get_query_argument('wd', '5'))
-            if self._window_duration < 1 or self._window_duration > 10:
-                raise ValueError
-        except ValueError:
-            self.set_status(HTTPStatus.BAD_REQUEST)
-            self.finish("malformed or unsupported 'wd' "
-                        '(window duration secs) query parameter')
-            return
+    for segment in segments:
+        _logger.debug('sent %s segment %fs-%fs',
+                      segment.kind, segment.begin, segment.end)
+        await ctx.websocket.send_text(segment.to_json() + '\n')
 
-        capability = find_request_capability(_pyannote_pipelines.keys(), self)
-        if capability is None:
-            return
-        self._pyannote_pipeline = _pyannote_pipelines[capability]
 
-        content_type = self.request.headers.get(CONTENT_TYPE_HEADER)
-        if content_type != 'audio/lpcm':
-            self.set_status(HTTPStatus.BAD_REQUEST)
-            self.finish("unsupported audio type, expected 'audio/lpcm'")
-            return
-
-        window_buffer_len = int(self._window_duration * self._num_channels *
-                                self._sample_rate * _SAMPLE_SIZES[self._sample_type])
-        self._chunk_divider = ChunkDivider(
-            window_buffer_len, self._chunk_divider_callback)
-
-        self._segment_producer = SegmentProducer(
-            self._window_duration, 0.1, max_speech_duration)
-
-    async def _chunk_divider_callback(self, data) -> None:
-        annotation = await run_sync_task(self._annotate_window, data)
-
-        segments = self._segment_producer.next_window(
-            map(lambda t: (t[0].start, t[0].end), annotation.itertracks()))
-
-        for segment in segments:
-            _logger.debug('written %s segment %fs-%fs',
-                          segment.kind, segment.begin, segment.end)
-            await self.write_message(segment.to_json() + '\n')
-
-    def open(self, *_args: str, **_kwargs: str) -> None:
-        _logger.debug('open /segment')
-
-    async def on_message(self, message) -> None:
-        # pylint: disable=invalid-overridden-method
-        if isinstance(message, bytes):
-            await self._chunk_divider.add(message)
-
-    def on_close(self) -> None:
-        _logger.debug('on_close /segment')
-
-    def _annotate_window(self, data: bytes) -> Annotation:
-        dtype = _SAMPLE_DTYPES[self._sample_type]
-        device = self._pyannote_pipeline.device
-        waveform = torch.frombuffer(data, dtype=dtype).to(device)
-        waveform = waveform.reshape((-1, self._num_channels))
-        waveform = torch.transpose(waveform, 0, 1)
-        waveform = torch.mean(waveform.float(), dim=0, keepdim=True)
-        if not dtype.is_floating_point:
-            sample_size = _SAMPLE_SIZES[self._sample_type]
-            waveform /= 2 ** (sample_size * 8 - 1) - 1
-        audio = {'waveform': waveform, 'sample_rate': self._sample_rate}
-        return self._pyannote_pipeline(audio)
+def _annotate_window(ctx: _Context, data: bytes) -> Annotation:
+    dtype = _SAMPLE_DTYPES[ctx.sample_type]
+    device = ctx.pipeline.device
+    waveform = torch.frombuffer(data, dtype=dtype).to(device)
+    waveform = waveform.reshape((-1, ctx.num_channels))
+    waveform = torch.transpose(waveform, 0, 1)
+    waveform = torch.mean(waveform.float(), dim=0, keepdim=True)
+    if not dtype.is_floating_point:
+        sample_size = _SAMPLE_SIZES[ctx.sample_type]
+        waveform /= 2 ** (sample_size * 8 - 1) - 1
+    audio = {'waveform': waveform, 'sample_rate': ctx.sample_rate}
+    return ctx.pipeline(audio)

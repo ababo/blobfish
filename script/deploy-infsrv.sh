@@ -42,7 +42,7 @@ pip install --break-system-packages \
     faster-whisper \
     onnxruntime \
     pyannote-audio \
-    tornado
+    uvicorn
 '
 
 ssh root@$SSH_ADDRESS 'mkdir -p blobfish'

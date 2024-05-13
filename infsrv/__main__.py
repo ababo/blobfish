@@ -5,11 +5,11 @@ import asyncio
 import os
 from typing import List
 
-from tornado.web import Application
+from fastapi import FastAPI
+import uvicorn
+import uvicorn.config
 
 from handler import segment, transcribe
-from handler.segment import SegmentHandler
-from handler.transcribe import TranscribeHandler
 from capability import CapabilitySet
 import util
 
@@ -43,11 +43,16 @@ def _parse_args() -> Namespace:
     return parser.parse_args()
 
 
-def _make_web_app() -> Application:
-    return Application([
-        (r"/segment", SegmentHandler),
-        (r"/transcribe", TranscribeHandler),
-    ])
+def _make_web_app() -> FastAPI:
+    app = FastAPI()
+    app.add_api_websocket_route(
+        '/segment',
+        segment.handle_segment)
+    app.add_api_route(
+        '/transcribe',
+        transcribe.handle_transcribe,
+        methods=['POST'])
+    return app
 
 
 async def main() -> None:
@@ -62,9 +67,18 @@ async def main() -> None:
     _logger.info('initialized modules')
 
     app = _make_web_app()
-    app.listen(args.server_port, args.server_address)
+    loop = asyncio.get_event_loop()
+    log_config = uvicorn.config.LOGGING_CONFIG
+    log_formatter = log_config['formatters']['default']
+    log_formatter['fmt'] = util.LOGGING_FMT
+    log_formatter['datefmt'] = util.LOGGING_DATEFMT
+    config = uvicorn.Config(app=app, loop=loop,
+                            host=args.server_address,
+                            port=int(args.server_port),
+                            log_config=log_config)
+    server = uvicorn.Server(config)
+    await server.serve()
 
-    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(main())

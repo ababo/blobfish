@@ -3,9 +3,9 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from http import HTTPStatus
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, List
 
-from tornado.web import RequestHandler
+from fastapi import HTTPException
 
 CAPABILITIES_HEADER = 'X-Blobfish-Capabilities'
 CONTENT_TYPE_HEADER = 'Content-Type'
@@ -14,25 +14,25 @@ CONTENT_TYPE_JSON = 'application/json'
 _executor = ThreadPoolExecutor()
 
 
-def find_request_capability(capabilities: Iterable[str],
-                            handler: RequestHandler) -> str | None:
+def find_request_capability(
+        enabled: Iterable[str],
+        header: str
+) -> str:
     """
-    Find capability from a given list for a given request.
+    Find capability in a given value of the capabilities header.
     If no capability found the request fails with Bad Request.
     """
-    req_caps = handler.request.headers.get(CAPABILITIES_HEADER)
-    req_caps = [] if req_caps is None else req_caps.split(',')
+    req_caps = header.split(',')
 
-    capabilities = list(capabilities)
+    enabled = list(enabled)
     for cap in req_caps:
-        if cap in capabilities:
+        if cap in enabled:
             return cap
 
-    handler.set_status(HTTPStatus.BAD_REQUEST)
-    handler.finish(
-        'missing, unknown or disabled capability, expected one '
-        f"of {capabilities}' in '{CAPABILITIES_HEADER}' header")
-    return None
+    raise HTTPException(
+        HTTPStatus.BAD_REQUEST,
+        'missing, unknown or disabled capability, expected '
+        f"one of {enabled}' in '{CAPABILITIES_HEADER}' header")
 
 
 async def run_sync_task(task: Callable[..., Any], *args: ...) -> Any:

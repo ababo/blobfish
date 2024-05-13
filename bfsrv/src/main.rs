@@ -22,7 +22,9 @@ async fn main() {
 }
 
 async fn run(config: Arc<Config>) -> Result<()> {
-    env_logger::init();
+    env_logger::builder()
+    .format_timestamp_millis()
+    .init();
 
     let server = Arc::new(Server::new(config.clone(), InfsrvPool::new()));
     let server_handle = tokio::spawn(async move {
