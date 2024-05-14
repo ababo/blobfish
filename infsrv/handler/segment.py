@@ -124,11 +124,13 @@ async def handle_segment(  # pylint: disable=too-many-arguments
             data = await websocket.receive_bytes()
             if terminator is not None and \
                     data[-len(terminator):] == terminator:
+                _logger.debug('detected pcm stream terminator')
                 await chunk_divider.add(data[:-len(terminator)], last=True)
                 await websocket.close()
                 break
             await chunk_divider.add(data)
-        except WebSocketDisconnect:
+        except WebSocketDisconnect as err:
+            _logger.debug(f'ws disconnect error: {err}')
             break
 
 

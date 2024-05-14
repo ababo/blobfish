@@ -11,7 +11,7 @@ use axum::{
     routing::get,
     Router,
 };
-use log::info;
+use log::{debug, info};
 use std::{future::Future, net::SocketAddr, sync::Arc};
 
 /// Server error.
@@ -43,6 +43,8 @@ impl IntoResponse for Error {
             }
             Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
+
+        debug!("failed to serve HTTP request: {self:#}");
 
         // TODO: Support error codes.
         (status, self.to_string()).into_response()

@@ -18,6 +18,9 @@ use uuid::Uuid;
 /// Request capabilities header name.
 const CAPABILITIES_HEADER: &str = "X-Blobfish-Capabilities";
 
+/// Stream terminator header name.
+pub const TERMINATOR_HEADER: &str = "X-Blobfish-Terminator";
+
 /// Max speech segment duration.
 pub const MAX_SEGMENT_DURATION: f32 = 30.0;
 
@@ -71,6 +74,7 @@ impl InfsrvPool {
     pub async fn segment(
         &self,
         _user: Uuid,
+        terminator: Option<&[u8]>,
     ) -> Result<(Sender<Vec<u8>>, Receiver<Result<SegmentItem>>)> {
         // TODO: Allocate URL and capabilities dynamically instead of hardcoding.
         let mut url = Url::parse("ws://127.0.0.1:9322/segment").unwrap();
@@ -90,35 +94,25 @@ impl InfsrvPool {
             capabilities.join(",").try_into().unwrap(),
         );
         headers.append(CONTENT_TYPE, "audio/lpcm".try_into().unwrap());
+        if let Some(delim) = terminator {
+            headers.append(TERMINATOR_HEADER, delim.try_into().unwrap());
+        }
 
         let (ws, _) = connect_async(request).await?;
         let (mut ws_sender, mut ws_receiver) = ws.split();
 
-        let (in_sender, in_receiver) = channel(1);
-        let (out_sender, mut out_receiver) = channel(1);
-
-        // Some WS clients (e.g. websocat) ignore close-messages, so we must
-        // forcefully disconnect by closing ws_sender when in_receiver is destroyed.
-        let in_sender_cloned = in_sender.clone();
+        let (sender, infsrv_receiver) = channel(1);
+        let (infsrv_sender, mut receiver) = channel(1);
 
         tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    _ = in_sender_cloned.closed() => {
-                        break;
-                    }
-                    maybe_pcm = out_receiver.recv() => {
-                        let Some(pcm) = maybe_pcm else {
-                            break;
-                        };
-                        if let Err(err) = ws_sender.send(Message::binary(pcm)).await {
-                            debug!("failed to send to websocket: {err:#}");
-                            break;
-                        }
-                    }
+            while let Some(pcm) = receiver.recv().await {
+                if let Err(err) = ws_sender.send(Message::binary(pcm)).await {
+                    debug!("failed to send pcm to infsrv ws: {err:#}");
+                    break;
                 }
             }
-            ws_sender.close().await
+            let _ = ws_sender.close().await;
+            debug!("finished sending pcm to infsrv ws");
         });
 
         use Error::*;
@@ -128,31 +122,36 @@ impl InfsrvPool {
                     Ok(Message::Text(json)) => {
                         let Ok(item) = serde_json::from_str::<'_, SegmentItem>(&json) else {
                             debug!("failed to parse infsrv segment json '{json}'");
-                            let _ = in_sender.send(Err(Internal)).await;
+                            let _ = sender.send(Err(Internal)).await;
                             break;
                         };
-                        if in_sender.send(Ok(item)).await.is_err() {
+                        if sender.send(Ok(item)).await.is_err() {
                             break;
                         }
                     }
-                    Ok(Message::Close(reason)) => {
-                        debug!("received close msg (reason = {reason:?}) from infsrv ws");
+                    Ok(Message::Close(maybe_reason)) => {
+                        if let Some(reason) = maybe_reason {
+                            debug!("received close msg (reason = {reason}) from infsrv ws");
+                        } else {
+                            debug!("received close msg from infsrv ws");
+                        }
                         break;
                     }
                     Ok(msg) => {
-                        debug!("ignoring infsrv ws {msg:?}");
+                        debug!("ignoring infsrv ws msg {msg:?}");
                         continue;
                     }
                     Err(err) => {
                         debug!("failed to receive from infsrv ws: {err:#}");
-                        let _ = in_sender.send(Err(Tungstanite(err))).await;
+                        let _ = sender.send(Err(Tungstanite(err))).await;
                         break;
                     }
                 }
             }
+            debug!("finished receiving segments from infsrv ws");
         });
 
-        Ok((out_sender, in_receiver))
+        Ok((infsrv_sender, infsrv_receiver))
     }
 
     /// Transcribe a given wav-blob.

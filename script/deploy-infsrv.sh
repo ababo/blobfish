@@ -25,8 +25,8 @@ if [ -z "$SERVER_ADDRESS" ]; then
 fi
 
 if [ -z "$SERVER_PORT" ]; then
-    echo "no SERVER_PORT env var is set, using 80"
-    SERVER_PORT=80
+    echo "no SERVER_PORT env var is set, using 9322"
+    SERVER_PORT=9322
 fi
 
 ssh root@$SSH_ADDRESS 'apt-get update'
@@ -39,6 +39,7 @@ apt-get install -y \
 ssh root@$SSH_ADDRESS '
 pip install --break-system-packages \
     dataclasses_json \
+    fastapi \
     faster-whisper \
     onnxruntime \
     pyannote-audio \

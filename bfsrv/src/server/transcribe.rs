@@ -1,21 +1,24 @@
 use crate::{
-    infsrv_pool::{Result as InfsrvResult, SegmentItem, MAX_SEGMENT_DURATION, SAMPLE_RATE},
+    infsrv_pool::{
+        Result as InfsrvResult, SegmentItem, MAX_SEGMENT_DURATION, SAMPLE_RATE, TERMINATOR_HEADER,
+    },
     server::{middleware::Auth, Error, Result, Server},
 };
 use axum::{
     extract::{
-        ws::{Message, WebSocket},
+        ws::{CloseFrame, Message, WebSocket},
         Query, State, WebSocketUpgrade,
     },
     http::{header::CONTENT_TYPE, HeaderMap, HeaderValue},
     response::IntoResponse,
 };
 use futures::{
+    channel::mpsc::channel,
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt, TryStreamExt,
 };
 use hound::{SampleFormat, WavSpec, WavWriter};
-use log::{debug, error};
+use log::{debug, error, info};
 use ogg::reading::async_api::PacketReader;
 use rubato::{FastFixedIn, PolynomialDegree, Resampler};
 use serde::{Deserialize, Serialize};
@@ -23,8 +26,10 @@ use std::{
     collections::VecDeque,
     io::{Cursor, Error as IoError, ErrorKind as IoErrorKind},
     mem::swap,
-    result::Result as StdResult,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 use symphonia::{
     core::{
@@ -34,7 +39,10 @@ use symphonia::{
     },
     default::codecs::VorbisDecoder,
 };
-use tokio::sync::mpsc::{channel, error::SendError, Receiver, Sender};
+use tokio::{
+    io::AsyncRead,
+    sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender},
+};
 
 const VORBIS_CONTENT_TYPE: &str = "audio/ogg; codecs=vorbis";
 
@@ -64,13 +72,21 @@ pub async fn handle_transcribe(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Result<impl IntoResponse> {
-    debug!("received transcribe request");
+    info!("received transcribe request");
 
     if headers.get(CONTENT_TYPE) != Some(&HeaderValue::from_static(VORBIS_CONTENT_TYPE)) {
         return Err(Error::BadRequest("unsupported content type".to_owned()));
     }
 
-    let (infsrv_sender, infsrv_receiver) = server.infsrv_pool.segment(auth.user).await?;
+    let terminator = headers.get(TERMINATOR_HEADER).map(|v| {
+        debug!("stream terminator: {}", v.to_str().unwrap_or("?"));
+        v.as_bytes().to_vec()
+    });
+
+    let (infsrv_sender, infsrv_receiver) = server
+        .infsrv_pool
+        .segment(auth.user, terminator.as_deref())
+        .await?;
 
     Ok(ws.on_upgrade(move |client_ws| async {
         ws_callback(
@@ -80,6 +96,7 @@ pub async fn handle_transcribe(
             infsrv_sender,
             infsrv_receiver,
             client_ws,
+            terminator,
         )
         .await
     }))
@@ -92,6 +109,7 @@ async fn ws_callback(
     infsrv_sender: Sender<Vec<u8>>,
     infsrv_receiver: Receiver<InfsrvResult<SegmentItem>>,
     client_ws: WebSocket,
+    terminator: Option<Vec<u8>>,
 ) {
     let (client_sender, client_receiver) = client_ws.split();
 
@@ -100,7 +118,7 @@ async fn ws_callback(
         RING_BUFFER_CAPACITY,
     )));
 
-    let (limit_sender, limit_receiver) = channel::<f32>(10);
+    let (limit_sender, limit_receiver) = unbounded_channel::<f32>();
 
     let cloned_server = server.clone();
     let cloned_ring_buffer = ring_buffer.clone();
@@ -123,13 +141,14 @@ async fn ws_callback(
             server,
             infsrv_sender,
             client_receiver,
+            terminator,
             ring_buffer.clone(),
             limit_receiver,
         )
         .await;
 
     let _ = segment_handle.await;
-    debug!("disconnected transcribe");
+    info!("disconnected transcribe");
 }
 
 async fn process_segments(
@@ -139,15 +158,17 @@ async fn process_segments(
     mut client_sender: SplitSink<WebSocket, Message>,
     mut infsrv_receiver: Receiver<InfsrvResult<SegmentItem>>,
     ring_buffer: Arc<Mutex<RingBuffer>>,
-    limit_sender: Sender<f32>,
+    limit_sender: UnboundedSender<f32>,
 ) {
     let mut item = None;
     while let Some(Ok(segment_item)) = infsrv_receiver.recv().await {
         use SegmentItem::*;
         let (begin, end) = match segment_item {
             Speech { begin, end } => (begin, end),
-            Void { begin: _, end } => {
-                if limit_sender.send(end).await.is_err() {
+            Void { begin, end } => {
+                debug!("received void segment {}s-{}s", begin, end);
+                if limit_sender.send(end).is_err() {
+                    debug!("failed to send time consumed for void segment");
                     break;
                 }
                 continue;
@@ -161,7 +182,8 @@ async fn process_segments(
             .unwrap()
             .extract_time_interval_wav(begin, end);
 
-        if limit_sender.send(end).await.is_err() {
+        if limit_sender.send(end).is_err() {
+            debug!("failed to send time consumed for speech segment");
             break;
         }
 
@@ -195,6 +217,8 @@ async fn process_segments(
             break;
         }
     }
+    let _ = client_sender.close().await;
+    debug!("finished processing infsrv segments");
 }
 
 struct AudioStreamProcessor {
@@ -217,25 +241,39 @@ impl AudioStreamProcessor {
         _server: Arc<Server>,
         infsrv_sender: Sender<Vec<u8>>,
         client_receiver: SplitStream<WebSocket>,
+        terminator: Option<Vec<u8>>,
         ring_buffer: Arc<Mutex<RingBuffer>>,
-        mut limit_receiver: Receiver<f32>,
+        mut limit_receiver: UnboundedReceiver<f32>,
     ) {
-        let data_reader = Box::pin(client_receiver.into_stream().filter_map(|msg| async {
-            match msg {
-                Ok(Message::Binary(data)) => Some(Ok(data)),
-                Ok(_) => None,
-                Err(err) => Some(Err(IoError::new(IoErrorKind::Other, err))),
-            }
-        }))
-        .into_async_read();
-        let mut packet_reader = PacketReader::new_compat(data_reader);
+        let terminated = Arc::new(AtomicBool::new(false));
+        let mut packet_reader =
+            Self::create_packet_reader(client_receiver, terminator.clone(), terminated.clone());
 
         let mut id_header = Vec::new();
         let mut decoder = None;
         let mut frames_consumed = 0;
 
         let mut packet_index = 0;
-        while let Some(Ok(mut packet)) = packet_reader.next().await {
+        loop {
+            let mut packet = tokio::select! {
+                 _ = infsrv_sender.closed() => {
+                        debug!("closed infsrv pcm sender");
+                        break;
+                }
+                result = packet_reader.next() => {
+                    match result {
+                        Some(Ok(packet)) => packet,
+                        Some(Err(err)) => {
+                            debug!("failed to read ogg packet: {err:#}");
+                            break;
+                        }
+                        None => {
+                            debug!("no more ogg packets");
+                            break;
+                        }
+                    }
+                }
+            };
             match packet_index {
                 0 => id_header = packet.data,
                 1 => (), // Skip comment header.
@@ -275,33 +313,85 @@ impl AudioStreamProcessor {
                         debug!("unsupported type of decoded samples");
                         return;
                     };
-                    if let Err(err) = self
+                    if !self
                         .process_audio_buffer(
                             &infsrv_sender,
                             &ring_buffer,
                             &mut limit_receiver,
                             &mut frames_consumed,
                             buf_f32.as_ref(),
+                            terminator
+                                .as_deref()
+                                .filter(|_| terminated.load(Ordering::SeqCst)),
                         )
                         .await
                     {
-                        debug!("failed to process audio buffer: {err:#}");
-                        return;
+                        break;
                     }
                 }
             }
             packet_index += 1;
         }
+        debug!("finished processing client audio stream");
+    }
+
+    fn create_packet_reader(
+        mut client_receiver: SplitStream<WebSocket>,
+        terminator: Option<Vec<u8>>,
+        terminated: Arc<AtomicBool>,
+    ) -> PacketReader<impl AsyncRead> {
+        let (mut sender, receiver) = channel(0);
+        tokio::spawn(async move {
+            while let Some(result) = client_receiver.next().await {
+                match result {
+                    Ok(Message::Binary(mut data)) => {
+                        if let Some(delim) = terminator.as_deref() {
+                            if data.ends_with(delim) {
+                                data.truncate(data.len() - delim.len());
+                                terminated.store(true, Ordering::SeqCst);
+                                debug!("detected client audio stream terminator");
+                            }
+                        }
+                        if sender.send(Ok(data)).await.is_err() {
+                            debug!("failed to send data to packet reader");
+                            break;
+                        }
+                    }
+                    Ok(Message::Close(maybe_reason)) => {
+                        if let Some(CloseFrame { code, reason }) = maybe_reason {
+                            debug!("received close msg (code {code}, reason='{reason}') from client ws");
+                        } else {
+                            debug!("received close msg from client ws");
+                        }
+                        break;
+                    }
+                    Ok(msg) => {
+                        debug!("ignoring client ws msg {msg:?}");
+                    }
+                    Err(err) => {
+                        debug!("failed to read client ws: {err:#}");
+                        let io_err = IoError::new(IoErrorKind::Other, err);
+                        if sender.send(Err(io_err)).await.is_err() {
+                            debug!("failed to send error to packet reader");
+                            break;
+                        }
+                    }
+                }
+            }
+            debug!("finished to read client ws");
+        });
+        PacketReader::new_compat(receiver.into_async_read())
     }
 
     async fn process_audio_buffer(
         &mut self,
         infsrv_sender: &Sender<Vec<u8>>,
         ring_buffer: &Mutex<RingBuffer>,
-        limit_receiver: &mut Receiver<f32>,
+        limit_receiver: &mut UnboundedReceiver<f32>,
         frames_consumed: &mut usize,
         audio_buffer: &AudioBuffer<f32>,
-    ) -> StdResult<(), SendError<Vec<u8>>> {
+        terminator: Option<&[u8]>,
+    ) -> bool {
         self.merge_channels(audio_buffer);
         self.resample(audio_buffer.spec().rate as f32);
 
@@ -314,8 +404,8 @@ impl AudioStreamProcessor {
             if chunk_len == 0 {
                 // Wait until more frames have been consumed before pushing.
                 let Some(time_consumed) = limit_receiver.recv().await else {
-                    // Probably is closing, let it shut down gracefully.
-                    return Ok(());
+                    debug!("failed to read from limit receiver");
+                    return false;
                 };
                 *frames_consumed = (time_consumed * SAMPLE_RATE) as usize;
                 continue;
@@ -330,11 +420,17 @@ impl AudioStreamProcessor {
                     guard.push(i16_sample);
                 }
             }
-            infsrv_sender.send(pcm).await?;
+            if let Some(delim) = terminator {
+                pcm.append(&mut delim.to_vec());
+            }
+            if let Err(err) = infsrv_sender.send(pcm).await {
+                debug!("failed to send pcm to infsrv ws: {err:#}");
+                return false;
+            }
             offset += chunk_len;
         }
 
-        Ok(())
+        true
     }
 
     fn merge_channels(&mut self, audio_buffer: &AudioBuffer<f32>) {
