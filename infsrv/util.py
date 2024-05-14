@@ -26,7 +26,6 @@ def add_logger(name: str) -> logging.Logger:
     _loggers[name] = logger
     return logger
 
-
 def setup_logging(level: str) -> None:
     """Configure logging and set level."""
 

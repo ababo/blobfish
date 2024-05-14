@@ -8,8 +8,7 @@ from typing import Any, Callable, Iterable, List
 from fastapi import HTTPException
 
 CAPABILITIES_HEADER = 'X-Blobfish-Capabilities'
-CONTENT_TYPE_HEADER = 'Content-Type'
-CONTENT_TYPE_JSON = 'application/json'
+TERMINATOR_HEADER = 'X-Blobfish-Terminator'
 
 _executor = ThreadPoolExecutor()
 

@@ -14,7 +14,8 @@ import torch
 
 from capability import CapabilitySet
 from handler import (
-    CAPABILITIES_HEADER, find_request_capability, run_sync_task
+    CAPABILITIES_HEADER, TERMINATOR_HEADER,
+    find_request_capability, run_sync_task
 )
 from segment import ChunkDivider, SegmentProducer
 import util
@@ -50,20 +51,23 @@ class _Context:
 
 async def handle_segment(  # pylint: disable=too-many-arguments
         websocket: WebSocket,
-        max_speech_duration: float = Query(..., alias='msd'),
+        max_segment_duration: float = Query(..., alias='msd'),
         num_channels: int = Query(..., alias='nc'),
         sample_rate: float = Query(..., alias='sr'),
         sample_type: str = Query(..., alias='st'),
         window_duration: float = Query(alias='wd', default=5),
         capabilities: str = Header(..., alias=CAPABILITIES_HEADER),
         content_type: str = Header(...),
+        terminator: str | None = Header(alias=TERMINATOR_HEADER,
+                                        default=None),
 ) -> None:
     """Websocket handler for realtime audio segmentation."""
-    if max_speech_duration < 10 or max_speech_duration > 90:
+    # pylint: disable=too-many-locals
+    if max_segment_duration < 10 or max_segment_duration > 90:
         raise HTTPException(
             HTTPStatus.BAD_REQUEST,
             'missing, malformed or unsupported '
-            "'msd' (max speech duration) query parameter")
+            "'msd' (max segment duration) query parameter")
 
     if num_channels < 1 or num_channels > 8:
         raise HTTPException(
@@ -98,11 +102,13 @@ async def handle_segment(  # pylint: disable=too-many-arguments
             HTTPStatus.BAD_REQUEST,
             "unsupported audio type, expected 'audio/lpcm'")
 
+    terminator = None if terminator is None \
+        else bytes(terminator, encoding='ISO-8859-1')
+
     await websocket.accept()
-    _logger.debug('open /segment')
 
     segment_producer = SegmentProducer(
-        window_duration, 0.1, max_speech_duration)
+        window_duration, max_segment_duration, 0.1)
     ctx = _Context(websocket, num_channels, sample_rate,
                    sample_type, pipeline, segment_producer)
 
@@ -111,22 +117,27 @@ async def handle_segment(  # pylint: disable=too-many-arguments
         sample_rate * _SAMPLE_SIZES[sample_type])
     chunk_divider = ChunkDivider(
         window_buffer_len,
-        lambda data: _chunk_divider_callback(ctx, data))
+        lambda data, last: _chunk_divider_callback(ctx, data, last))
 
     while True:
         try:
             data = await websocket.receive_bytes()
+            if terminator is not None and \
+                    data[-len(terminator):] == terminator:
+                await chunk_divider.add(data[:-len(terminator)], last=True)
+                await websocket.close()
+                break
             await chunk_divider.add(data)
         except WebSocketDisconnect:
-            _logger.debug('close /segment')
             break
 
 
-async def _chunk_divider_callback(ctx: _Context, data: bytes) -> None:
+async def _chunk_divider_callback(
+        ctx: _Context, data: bytes, last: bool) -> None:
     annotation = await run_sync_task(_annotate_window, ctx, data)
 
     segments = ctx.segment_producer.next_window(
-        map(lambda t: (t[0].start, t[0].end), annotation.itertracks()))
+        map(lambda t: (t[0].start, t[0].end), annotation.itertracks()), last)
 
     for segment in segments:
         _logger.debug('sent %s segment %fs-%fs',

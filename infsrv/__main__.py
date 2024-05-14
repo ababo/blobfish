@@ -3,7 +3,7 @@
 from argparse import ArgumentError, ArgumentParser, Namespace
 import asyncio
 import os
-from typing import List
+from typing import Any, List
 
 from fastapi import FastAPI
 import uvicorn
@@ -55,6 +55,17 @@ def _make_web_app() -> FastAPI:
     return app
 
 
+def _create_uvicorn_log_config() -> Any:
+    log_config = uvicorn.config.LOGGING_CONFIG
+    log_formatter = log_config['formatters']['default']
+    log_formatter['fmt'] = util.LOGGING_FMT
+    log_formatter['datefmt'] = util.LOGGING_DATEFMT
+    log_formatter = log_config['formatters']['access']
+    log_formatter['fmt'] = util.LOGGING_FMT
+    log_formatter['datefmt'] = util.LOGGING_DATEFMT
+    return log_config
+
+
 async def main() -> None:
     """Inference server logic."""
 
@@ -68,10 +79,7 @@ async def main() -> None:
 
     app = _make_web_app()
     loop = asyncio.get_event_loop()
-    log_config = uvicorn.config.LOGGING_CONFIG
-    log_formatter = log_config['formatters']['default']
-    log_formatter['fmt'] = util.LOGGING_FMT
-    log_formatter['datefmt'] = util.LOGGING_DATEFMT
+    log_config = _create_uvicorn_log_config()
     config = uvicorn.Config(app=app, loop=loop,
                             host=args.server_address,
                             port=int(args.server_port),
