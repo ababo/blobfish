@@ -26,10 +26,7 @@ use std::{
     collections::VecDeque,
     io::{Cursor, Error as IoError, ErrorKind as IoErrorKind},
     mem::swap,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
+    sync::{Arc, Mutex},
 };
 use symphonia::{
     core::{
@@ -42,6 +39,7 @@ use symphonia::{
 use tokio::{
     io::AsyncRead,
     sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender},
+    task::JoinHandle,
 };
 
 const VORBIS_CONTENT_TYPE: &str = "audio/ogg; codecs=vorbis";
@@ -245,9 +243,8 @@ impl AudioStreamProcessor {
         ring_buffer: Arc<Mutex<RingBuffer>>,
         mut limit_receiver: UnboundedReceiver<f32>,
     ) {
-        let terminated = Arc::new(AtomicBool::new(false));
-        let mut packet_reader =
-            Self::create_packet_reader(client_receiver, terminator.clone(), terminated.clone());
+        let (mut packet_reader, join_handle) =
+            Self::create_packet_reader(client_receiver, terminator.clone());
 
         let mut id_header = Vec::new();
         let mut decoder = None;
@@ -274,6 +271,8 @@ impl AudioStreamProcessor {
                     }
                 }
             };
+
+            let last = packet.last_in_stream();
             match packet_index {
                 0 => id_header = packet.data,
                 1 => (), // Skip comment header.
@@ -320,9 +319,7 @@ impl AudioStreamProcessor {
                             &mut limit_receiver,
                             &mut frames_consumed,
                             buf_f32.as_ref(),
-                            terminator
-                                .as_deref()
-                                .filter(|_| terminated.load(Ordering::SeqCst)),
+                            terminator.as_deref().filter(|_| last),
                         )
                         .await
                     {
@@ -333,27 +330,39 @@ impl AudioStreamProcessor {
             packet_index += 1;
         }
         debug!("finished processing client audio stream");
+
+        let mut client_receiver = join_handle.await.unwrap();
+        while let Some(Ok(msg)) = client_receiver.next().await {
+            debug!("ignoring client ws post-audio msg {msg:?}");
+        }
+        debug!("finished to read post-audio client ws");
     }
 
     fn create_packet_reader(
         mut client_receiver: SplitStream<WebSocket>,
         terminator: Option<Vec<u8>>,
-        terminated: Arc<AtomicBool>,
-    ) -> PacketReader<impl AsyncRead> {
-        let (mut sender, receiver) = channel(0);
-        tokio::spawn(async move {
+    ) -> (
+        PacketReader<impl AsyncRead>,
+        JoinHandle<SplitStream<WebSocket>>,
+    ) {
+        let (mut sender, receiver) = channel(32);
+        let join_handle = tokio::spawn(async move {
             while let Some(result) = client_receiver.next().await {
                 match result {
                     Ok(Message::Binary(mut data)) => {
+                        let mut last = false;
                         if let Some(delim) = terminator.as_deref() {
                             if data.ends_with(delim) {
                                 data.truncate(data.len() - delim.len());
-                                terminated.store(true, Ordering::SeqCst);
                                 debug!("detected client audio stream terminator");
+                                last = true;
                             }
                         }
                         if sender.send(Ok(data)).await.is_err() {
                             debug!("failed to send data to packet reader");
+                            break;
+                        }
+                        if last {
                             break;
                         }
                     }
@@ -378,9 +387,13 @@ impl AudioStreamProcessor {
                     }
                 }
             }
-            debug!("finished to read client ws");
+            debug!("finished to feed ogg packet reader");
+            client_receiver
         });
-        PacketReader::new_compat(receiver.into_async_read())
+        (
+            PacketReader::new_compat(receiver.into_async_read()),
+            join_handle,
+        )
     }
 
     async fn process_audio_buffer(
@@ -420,14 +433,18 @@ impl AudioStreamProcessor {
                     guard.push(i16_sample);
                 }
             }
-            if let Some(delim) = terminator {
-                pcm.append(&mut delim.to_vec());
-            }
             if let Err(err) = infsrv_sender.send(pcm).await {
                 debug!("failed to send pcm to infsrv ws: {err:#}");
                 return false;
             }
             offset += chunk_len;
+        }
+
+        if let Some(delim) = terminator {
+            if let Err(err) = infsrv_sender.send(delim.to_owned()).await {
+                debug!("failed to send terminator to infsrv ws: {err:#}");
+                return false;
+            }
         }
 
         true

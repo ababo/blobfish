@@ -64,7 +64,7 @@ async def transcribe(args: Namespace, path: str, language: str) -> str:
     headers = dict(args.header)
     headers['X-Blobfish-Terminator'] = args.terminator
 
-    async with connect(url, extra_headers=headers) as ws:
+    async with connect(url, extra_headers=headers, ping_interval=None) as ws:
         read_task = asyncio.create_task(_read_segments(ws))
 
         with open(path, 'rb') as file:

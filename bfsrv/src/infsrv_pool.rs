@@ -101,8 +101,8 @@ impl InfsrvPool {
         let (ws, _) = connect_async(request).await?;
         let (mut ws_sender, mut ws_receiver) = ws.split();
 
-        let (sender, infsrv_receiver) = channel(1);
-        let (infsrv_sender, mut receiver) = channel(1);
+        let (sender, infsrv_receiver) = channel(32);
+        let (infsrv_sender, mut receiver) = channel(32);
 
         tokio::spawn(async move {
             while let Some(pcm) = receiver.recv().await {
