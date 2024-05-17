@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from argparse import ArgumentParser, Namespace
+from argparse import ArgumentError, ArgumentParser, Namespace
 import asyncio
 import json
 import logging
@@ -23,19 +23,24 @@ def _parse_args() -> Namespace:
                         default=env('SERVER_ADDRESS', '127.0.0.1'))
     parser.add_argument('-d', '--data-dir',
                         default=env('DATA_DIR', 'test/data'))
-    parser.add_argument('-r', '--recording_path',
-                        default=env('RECORDING_PATH'))
     parser.add_argument(
         '--header', action='append', nargs=2, metavar=('KEY', 'VALUE'),
         default=[('Content-Type', 'audio/ogg; codecs=vorbis')])
+    parser.add_argument('-g', '--language', default=env('LANGUAGE'))
     parser.add_argument('-l', '--log-level', default=env('LOG_LEVEL', 'INFO'))
     parser.add_argument('-p', '--server-port',
                         default=env('SERVER_PORT', '9321'))
+    parser.add_argument('-r', '--recording', default=env('RECORDING'))
     parser.add_argument('-t', '--tariff', default=env('TARIFF', 'basic'))
     parser.add_argument('--terminator', default=env(
         'TERMINATOR', 'measure-accuracy-terminator'))
 
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    if args.recording is not None and args.language is None:
+        parser.error('no language specified for recording')
+
+    return args
 
 
 async def _read_segments(ws: ClientConnection) -> str:
@@ -55,8 +60,13 @@ async def _read_segments(ws: ClientConnection) -> str:
     return text
 
 
-async def transcribe(args: Namespace, path: str, language: str) -> str:
-    """Transcription a given recording file."""
+async def transcribe(
+        args: Namespace,
+        path: str,
+        language: str | None = None
+) -> str:
+    """Transcribe a given recording path."""
+    language = args.language if language is None else language
     address = f'{args.server_address}:{args.server_port}'
     query = f'tariff={args.tariff}&lang={language}'
     url = f'ws://{address}/transcribe?{query}'
@@ -79,25 +89,52 @@ async def transcribe(args: Namespace, path: str, language: str) -> str:
     return text
 
 
-async def measure_accuracy(args: Namespace, path: str) -> float:
-    """Measure transcription accuracy for a given recording file."""
-    name = os.path.basename(path)
-    parts = os.path.splitext(name)
-    language, _ = parts[0].split('-', 1)
+async def measure_recording_accuracy(
+        args: Namespace,
+        language: str | None = None,
+        recording: str | None = None
+) -> float:
+    """Measure transcription accuracy for a given recording."""
+    language = args.language if language is None else language
+    recording = args.recording if recording is None else recording
+    prefix = os.path.join(args.data_dir, language, recording)
+    txt_path, ogg_file = f'{prefix}.txt', f'{prefix}.ogg'
 
-    actual_text = await transcribe(args, path, language)
-    logging.debug(f'transcribed text: "{actual_text}"')
-
-    txt_base, _ = os.path.splitext(path)
-    txt_path = txt_base + '.txt'
     with open(txt_path, 'r') as file:
         expected_text = file.read()
-        logging.debug(f'expected text: "{expected_text}"')
+        logging.info(
+            f'{language}/{recording} reference text:\n\n{expected_text}\n')
+
+    actual_text = await transcribe(args, ogg_file, language)
+    logging.info(
+        f'{language}/{recording} transcribed text:\n\n{actual_text}\n')
 
     distance = edit_distance(actual_text, expected_text)
     accuracy = 1 - distance / len(expected_text)
-    logging.info(f'{parts[0]} accuracy is {accuracy}')
+    logging.info(f'{language}/{recording} accuracy is {accuracy}')
     return accuracy
+
+
+async def measure_language_accuracy(
+        args: Namespace,
+        language: str | None = None,
+) -> float:
+    """Measure transcription accuracy for a given language."""
+    language = args.language if language is None else language
+
+    index, mean_accuracy = 0, 0
+    with os.scandir(os.path.join(args.data_dir, language)) as entries:
+        for entry in entries:
+            if not entry.is_file() or not entry.path.endswith('.ogg'):
+                continue
+            recording, _ = os.path.splitext(entry.name)
+            accuracy = await measure_recording_accuracy(
+                args, language=language, recording=recording)
+            mean_accuracy += (accuracy - mean_accuracy) / (index + 1)
+            index += 1
+
+    logging.info(f'{language} mean accuracy is {mean_accuracy}')
+    return mean_accuracy
 
 
 async def main():
@@ -105,26 +142,26 @@ async def main():
 
     logging.basicConfig(level=args.log_level.upper())
 
-    if args.recording_path is not None:
-        accuracy = await measure_accuracy(args, args.recording_path)
-        if accuracy is None:
-            logging.error('skipped unsupported recording')
+    if args.recording is not None:
+        await measure_recording_accuracy(args)
         return
 
-    mean_accuracy = 0
+    if args.language is not None:
+        accuracy = await measure_language_accuracy(args)
+        return
+
+    index, mean_accuracy = 0, 0
     with os.scandir(args.data_dir) as entries:
-        for index, entry in enumerate(entries):
-            if not entry.is_file():
+        for entry in entries:
+            if not entry.is_dir():
                 continue
-
-            _, extension = os.path.splitext(entry.path)
-            if extension != '.ogg':
-                continue
-
-            accuracy = await measure_accuracy(args, entry.path)
+            accuracy = await measure_language_accuracy(
+                args, language=entry.name)
             mean_accuracy += (accuracy - mean_accuracy) / (index + 1)
+            index += 1
 
-        logging.info(f'mean accuracy is {mean_accuracy}')
+    logging.info(f'mean accuracy is {mean_accuracy}')
+    print(mean_accuracy)
 
 if __name__ == "__main__":
     asyncio.run(main())
