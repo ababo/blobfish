@@ -130,7 +130,7 @@ async def handle_segment(  # pylint: disable=too-many-arguments
                 break
             await chunk_divider.add(data)
         except WebSocketDisconnect as err:
-            _logger.debug(f'ws disconnect error: {err}')
+            _logger.debug('ws disconnect error: %s', err)
             break
 
 

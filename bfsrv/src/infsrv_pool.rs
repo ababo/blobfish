@@ -167,9 +167,7 @@ impl InfsrvPool {
         let url = Url::parse("http://127.0.0.1:9322/transcribe").unwrap();
         let capabilities = ["transcribe-small-cpu"];
 
-        let mut form = Form::new()
-            .part("file", Part::bytes(wav_blob).file_name("file.wav"))
-            .text("temperature", "0");
+        let mut form = Form::new().part("file", Part::bytes(wav_blob).file_name("file.wav"));
 
         if let Some(language) = language {
             form = form.text("language", language);

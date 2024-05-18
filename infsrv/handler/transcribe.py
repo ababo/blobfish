@@ -32,7 +32,7 @@ async def handle_transcribe(
         file: UploadFile = File(...),
         prompt: str = Form(default=None),
         language: str = Form(default=None),
-        temperature: float = Form(default=0),
+        temperature: str | None = Form(default=None),
 ) -> None:
     """Speech to text conversion handler."""
 
@@ -45,13 +45,24 @@ async def handle_transcribe(
         raise HTTPException(HTTPStatus.BAD_REQUEST,
                             'bad or unsupported language')
 
+    if temperature is None:
+        temperatures = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+    else:
+        try:
+            temperatures = list(map(float, temperature.split(',')))
+        except ValueError as err:
+            raise HTTPException(
+                HTTPStatus.BAD_REQUEST,
+                'malformed temperature form parameter') from err
+
     def task():
         return model.transcribe(
             file.file,
             beam_size=beam_size,
             initial_prompt=prompt,
             language=language,
-            temperature=temperature)
+            temperature=temperatures,
+        )
 
     segments, _ = await run_sync_task(task)
     text = ''.join(map(lambda s: s.text, segments))
