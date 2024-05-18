@@ -1,21 +1,16 @@
-"""Request handler utility definitions."""
+"""Common server definitions."""
 
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-from http import HTTPStatus
-from typing import Any, Callable, Iterable, List
+from typing import Iterable
 
-from fastapi import HTTPException
+from fastapi import HTTPException, status
 
 CAPABILITIES_HEADER = 'X-Blobfish-Capabilities'
 TERMINATOR_HEADER = 'X-Blobfish-Terminator'
 
-_executor = ThreadPoolExecutor()
-
 
 def find_request_capability(
         enabled: Iterable[str],
-        header: str
+        header: str,
 ) -> str:
     """
     Find capability in a given value of the capabilities header.
@@ -29,12 +24,6 @@ def find_request_capability(
             return cap
 
     raise HTTPException(
-        HTTPStatus.BAD_REQUEST,
+        status.HTTP_400_BAD_REQUEST,
         'missing, unknown or disabled capability, expected '
         f"one of {enabled}' in '{CAPABILITIES_HEADER}' header")
-
-
-async def run_sync_task(task: Callable[..., Any], *args: ...) -> Any:
-    """Run a synchronous task in a thread pool."""
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_executor, task, *args)

@@ -1,16 +1,12 @@
-"""Inference server entry point."""
+"""Inference server."""
 
 from argparse import ArgumentError, ArgumentParser, Namespace
 import asyncio
 import os
-from typing import Any, List
+from typing import List
 
-from fastapi import FastAPI
-import uvicorn
-import uvicorn.config
-
-from handler import segment, transcribe
 from capability import CapabilitySet
+from server import Server
 import util
 
 _logger = util.add_logger('infsrv')
@@ -38,54 +34,21 @@ def _parse_args() -> Namespace:
     parser.add_argument('-a', '--server-address',
                         default=env('SERVER_ADDRESS', '127.0.0.1'))
     parser.add_argument('-p', '--server-port',
-                        default=env('SERVER_PORT', '9322'))
+                        default=env('SERVER_PORT', '9322'), type=int)
 
     return parser.parse_args()
 
 
-def _make_web_app() -> FastAPI:
-    app = FastAPI()
-    app.add_api_websocket_route(
-        '/segment',
-        segment.handle_segment)
-    app.add_api_route(
-        '/transcribe',
-        transcribe.handle_transcribe,
-        methods=['POST'])
-    return app
-
-
-def _create_uvicorn_log_config() -> Any:
-    log_config = uvicorn.config.LOGGING_CONFIG
-    log_formatter = log_config['formatters']['default']
-    log_formatter['fmt'] = util.LOGGING_FMT
-    log_formatter['datefmt'] = util.LOGGING_DATEFMT
-    log_formatter = log_config['formatters']['access']
-    log_formatter['fmt'] = util.LOGGING_FMT
-    log_formatter['datefmt'] = util.LOGGING_DATEFMT
-    return log_config
-
-
 async def main() -> None:
-    """Inference server logic."""
+    """Run inference server."""
 
     args = _parse_args()
     util.setup_logging(args.log_level)
     _logger.info('starting infsrv with args %s', vars(args))
 
-    segment.init(args.capabilities)
-    transcribe.init(args.capabilities)
-    _logger.info('initialized modules')
-
-    app = _make_web_app()
-    loop = asyncio.get_event_loop()
-    log_config = _create_uvicorn_log_config()
-    config = uvicorn.Config(app=app, loop=loop,
-                            host=args.server_address,
-                            port=int(args.server_port),
-                            log_config=log_config)
-    server = uvicorn.Server(config)
-    await server.serve()
+    server = Server(args.capabilities)
+    _logger.info('created server')
+    await server.serve(args.server_address, args.server_port)
 
 
 if __name__ == "__main__":
