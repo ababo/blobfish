@@ -83,7 +83,7 @@ pub async fn handle_transcribe(
 
     let (infsrv_sender, infsrv_receiver) = server
         .infsrv_pool
-        .segment(auth.user, terminator.as_deref())
+        .segment(auth.user, &query.tariff, terminator.as_deref())
         .await?;
 
     Ok(ws.on_upgrade(move |client_ws| async {

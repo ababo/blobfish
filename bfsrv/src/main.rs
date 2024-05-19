@@ -1,8 +1,11 @@
 mod config;
 mod infsrv_pool;
+mod ledger;
+mod postgres;
 mod server;
+mod store;
 
-use crate::config::Config;
+use crate::{config::Config, ledger::Ledger, postgres::PostgresStore};
 use clap::Parser;
 use infsrv_pool::InfsrvPool;
 use server::Server;
@@ -24,7 +27,8 @@ async fn main() {
 async fn run(config: Arc<Config>) -> Result<()> {
     env_logger::builder().format_timestamp_millis().init();
 
-    let server = Arc::new(Server::new(config.clone(), InfsrvPool::new()));
+    let ledger = Ledger::new(PostgresStore);
+    let server = Arc::new(Server::new(config.clone(), InfsrvPool::new(ledger)));
     let server_handle = tokio::spawn(async move {
         server
             .serve(&config.server_address, shutdown_signal())

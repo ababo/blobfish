@@ -39,6 +39,13 @@ impl IntoResponse for Error {
                     Internal | Reqwest(_) | SerdeJson(_) | Tungstanite(_) => {
                         StatusCode::INTERNAL_SERVER_ERROR
                     }
+                    Ledger(err) => {
+                        if err.is_internal() {
+                            StatusCode::INTERNAL_SERVER_ERROR
+                        } else {
+                            StatusCode::PAYMENT_REQUIRED
+                        }
+                    }
                 }
             }
             Io(_) => StatusCode::INTERNAL_SERVER_ERROR,

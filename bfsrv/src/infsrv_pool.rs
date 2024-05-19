@@ -1,3 +1,7 @@
+use crate::{
+    ledger::{Ledger, TaskType},
+    postgres::PostgresStore,
+};
 use axum::http::header::CONTENT_TYPE;
 use futures::{SinkExt, StreamExt};
 use log::debug;
@@ -6,12 +10,15 @@ use reqwest::{
     Client,
 };
 use serde::Deserialize;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use std::{sync::Arc, time::Duration};
+use tokio::{
+    sync::mpsc::{channel, Receiver, Sender},
+    time::interval,
+};
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{client::IntoClientRequest, Message},
 };
-
 use url::Url;
 use uuid::Uuid;
 
@@ -34,6 +41,8 @@ const WINDOW_DURATION: f32 = 5.0;
 pub enum Error {
     #[error("internal")]
     Internal,
+    #[error("ledger: {0}")]
+    Ledger(#[from] crate::ledger::Error),
     #[error("reqwest: {0}")]
     Reqwest(#[from] reqwest::Error),
     #[error("serde_json: {0}")]
@@ -60,12 +69,14 @@ pub struct TranscribeItem {
 }
 
 /// Pool of infsrv instances.
-pub struct InfsrvPool {}
+pub struct InfsrvPool {
+    ledger: Arc<Ledger<PostgresStore>>,
+}
 
 impl InfsrvPool {
     /// Create a new InfsrvPool instance.
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(ledger: Arc<Ledger<PostgresStore>>) -> Self {
+        Self { ledger }
     }
 
     /// Initiate a speech segmentation session.
@@ -73,13 +84,18 @@ impl InfsrvPool {
     /// and a receiver to receive time intervals (in milliseconds).
     pub async fn segment(
         &self,
-        _user: Uuid,
+        user: Uuid,
+        tariff: &str,
         terminator: Option<&[u8]>,
     ) -> Result<(Sender<Vec<u8>>, Receiver<Result<SegmentItem>>)> {
-        // TODO: Allocate URL and capabilities dynamically instead of hardcoding.
-        let mut url = Url::parse("ws://127.0.0.1:9322/segment").unwrap();
-        let capabilities = ["segment-cpu"];
+        let allocation = self
+            .ledger
+            .allocate(user, tariff, TaskType::Segment)
+            .await?;
+        debug!("created allocation {}", allocation.id());
 
+        let mut url = Url::parse("ws://127.0.0.1:9322/segment").unwrap();
+        url.set_ip_host(allocation.ip_address()).unwrap();
         url.query_pairs_mut()
             .append_pair("msd", &(MAX_SEGMENT_DURATION - WINDOW_DURATION).to_string())
             .append_pair("nc", "1")
@@ -91,7 +107,7 @@ impl InfsrvPool {
         let headers = request.headers_mut();
         headers.append(
             CAPABILITIES_HEADER,
-            capabilities.join(",").try_into().unwrap(),
+            allocation.capabilities().join(",").try_into().unwrap(),
         );
         headers.append(CONTENT_TYPE, "audio/lpcm".try_into().unwrap());
         if let Some(delim) = terminator {
@@ -105,12 +121,33 @@ impl InfsrvPool {
         let (infsrv_sender, mut receiver) = channel(32);
 
         tokio::spawn(async move {
-            while let Some(pcm) = receiver.recv().await {
-                if let Err(err) = ws_sender.send(Message::binary(pcm)).await {
-                    debug!("failed to send pcm to infsrv ws: {err:#}");
-                    break;
+            let mut closed_interval = interval(Duration::from_secs(5));
+            closed_interval.tick().await;
+            loop {
+                tokio::select! {
+                    Some(pcm) = receiver.recv() => {
+                        if let Err(err) = ws_sender.send(Message::binary(pcm)).await {
+                            debug!("failed to send pcm to infsrv ws: {err:#}");
+                            break;
+                        }
+                    },
+                    _ = closed_interval.tick() => {
+                        match allocation.check_closed().await {
+                            Ok(true) => {
+                                debug!("detected allocation {} closed", allocation.id());
+                                break;
+                            }
+                            Err(err) => {
+                                debug!("failed to check if allocation closed: {:#}", err);
+                                break;
+                            }
+                            _ => {},
+                        }
+                    }
+                    else => break,
                 }
             }
+
             let _ = ws_sender.close().await;
             debug!("finished sending pcm to infsrv ws");
         });
@@ -157,15 +194,17 @@ impl InfsrvPool {
     /// Transcribe a given wav-blob.
     pub async fn transcribe(
         &self,
-        _user: Uuid,
-        _tariff: &str,
+        user: Uuid,
+        tariff: &str,
         wav_blob: Vec<u8>,
         language: Option<String>,
         prompt: Option<String>,
     ) -> Result<TranscribeItem> {
-        // TODO: Allocate URL and capabilities dynamically instead of hardcoding.
-        let url = Url::parse("http://127.0.0.1:9322/transcribe").unwrap();
-        let capabilities = ["transcribe-small-cpu"];
+        let allocation = self
+            .ledger
+            .allocate(user, tariff, TaskType::Transcribe)
+            .await?;
+        debug!("created allocation {}", allocation.id());
 
         let mut form = Form::new().part("file", Part::bytes(wav_blob).file_name("file.wav"));
 
@@ -177,9 +216,11 @@ impl InfsrvPool {
             form = form.text("prompt", prompt);
         }
 
+        let mut url = Url::parse("http://127.0.0.1:9322/transcribe").unwrap();
+        url.set_ip_host(allocation.ip_address()).unwrap();
         let response = Client::default()
             .post(url)
-            .header(CAPABILITIES_HEADER, capabilities.join(","))
+            .header(CAPABILITIES_HEADER, allocation.capabilities().join(","))
             .multipart(form)
             .send()
             .await?;
