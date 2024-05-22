@@ -1,15 +1,17 @@
 mod config;
+mod data;
 mod infsrv_pool;
 mod ledger;
-mod postgres;
 mod server;
-mod store;
+mod util;
 
-use crate::{config::Config, ledger::Ledger, postgres::PostgresStore};
+use crate::{config::Config, ledger::Ledger};
 use clap::Parser;
+use deadpool_postgres::{Config as DeadpoolClient, ManagerConfig, RecyclingMethod, Runtime};
 use infsrv_pool::InfsrvPool;
 use server::Server;
 use std::{future::Future, sync::Arc};
+use tokio_postgres::NoTls;
 
 #[derive(Debug, thiserror::Error)]
 enum Error {}
@@ -27,7 +29,16 @@ async fn main() {
 async fn run(config: Arc<Config>) -> Result<()> {
     env_logger::builder().format_timestamp_millis().init();
 
-    let ledger = Ledger::new(PostgresStore);
+    let mut deadpool_config = DeadpoolClient::new();
+    deadpool_config.url = Some(config.database_url.to_string());
+    deadpool_config.manager = Some(ManagerConfig {
+        recycling_method: RecyclingMethod::Fast,
+    });
+    let pool = deadpool_config
+        .create_pool(Some(Runtime::Tokio1), NoTls)
+        .unwrap();
+
+    let ledger = Ledger::new(pool);
     let server = Arc::new(Server::new(config.clone(), InfsrvPool::new(ledger)));
     let server_handle = tokio::spawn(async move {
         server

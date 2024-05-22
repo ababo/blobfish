@@ -1,10 +1,34 @@
-use crate::store::Store;
-use std::{net::IpAddr, str::FromStr, sync::Arc};
+use crate::data::{
+    capability::{Capability, TaskType},
+    node::Node,
+    user::User,
+};
+use deadpool_postgres::{Client, Pool};
+use log::{debug, error};
+use rust_decimal::Decimal;
+use std::{net::IpAddr, time::Duration};
+use tokio::time::interval;
+use tokio_postgres::{error::SqlState, IsolationLevel};
 use uuid::Uuid;
 
 /// Ledger error.
 #[derive(Debug, thiserror::Error)]
-pub enum Error {}
+pub enum Error {
+    #[error("data: {0}")]
+    Data(#[from] crate::data::Error),
+    #[error("deadpool pool: {0}")]
+    DeadpoolPool(#[from] deadpool_postgres::PoolError),
+    #[error("node {0} not found")]
+    NodeNotFound(Uuid),
+    #[error("not enough balance")]
+    NotEnoughBalance,
+    #[error("postgres: {0}")]
+    Postgres(#[from] tokio_postgres::Error),
+    #[error("not enough resources")]
+    NotEnoughResources,
+    #[error("user {0} not found")]
+    UserNotFound(Uuid),
+}
 
 impl Error {
     /// Whether it's internal error.
@@ -18,87 +42,242 @@ impl Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Node usage ledger.
-pub struct Ledger<S: Store> {
-    _store: S,
+pub struct Ledger {
+    pool: Pool,
 }
 
-impl<S: Store> Ledger<S> {
+impl Ledger {
     /// Create a new Ledger instance.
-    pub fn new(_store: S) -> Arc<Self> {
-        Arc::new(Self { _store })
+    pub fn new(pool: Pool) -> Self {
+        Self { pool }
     }
 
     /// Allocate a node resource.
     pub async fn allocate(
-        self: &Arc<Self>,
-        _user: Uuid,
-        _tariff: &str,
+        &self,
+        user: Uuid,
+        tariff: &str,
         task_type: TaskType,
-    ) -> Result<Allocation<S>> {
-        // TODO: Replace this stub with a proper impl.
-        use TaskType::*;
+    ) -> Result<Allocation> {
+        let mut client = self.pool.get().await?;
+
+        let capabilities =
+            Capability::find_with_task_type_and_tariff(&client, task_type, tariff).await?;
+
+        let (compute, memory, fee) = capabilities.iter().fold((0, 0, Decimal::ZERO), |acc, cap| {
+            (
+                acc.0 + cap.compute_load,
+                acc.1 + cap.memory_load,
+                acc.2 + cap.fee,
+            )
+        });
+
+        let mut interval = interval(Duration::from_millis(10));
+        let mut remains = 10;
+
+        use Error::*;
+        let node = loop {
+            interval.tick().await;
+
+            let result =
+                Self::try_allocate_atomically(&mut client, user, compute, memory, fee).await;
+            if !matches!(&result, Err(NotEnoughResources)) && !is_serialization_failure(&result) {
+                break result;
+            }
+
+            remains -= 1;
+            if remains == 0 {
+                break result;
+            }
+        }?;
+
+        let allocation_id = Uuid::new_v4();
+        let capability_names: Vec<_> = capabilities.into_iter().map(|n| n.name).collect();
+        log::debug!(
+            "allocated {allocation_id} ({} on {} for {})",
+            capability_names.join(","),
+            node.id,
+            user
+        );
+
         Ok(Allocation {
-            id: Uuid::nil(),
-            capabilities: match task_type {
-                Segment => vec!["segment-cpu".to_owned()],
-                Transcribe => vec!["transcribe-small-cpu".to_owned()],
-            },
-            ip_address: IpAddr::from_str("127.0.0.1").unwrap(),
-            _ledger: self.clone(),
+            id: allocation_id,
+            ip_address: node.ip_address,
+            capabilities: capability_names,
+            pool: self.pool.clone(),
+            user,
+            node: node.id,
+            compute,
+            memory,
+            fee,
         })
     }
 
-    /// Deallocates a given resource allocation.
-    /// Returns true if a corresponding allocation was found and closed.
-    pub async fn deallocate(&self, _allocation: Uuid) -> Result<bool> {
-        // TODO: Implement this.
-        Ok(true)
-    }
-}
+    async fn try_allocate_atomically(
+        client: &mut Client,
+        user: Uuid,
+        compute: u32,
+        memory: u32,
+        fee: Decimal,
+    ) -> Result<Node> {
+        let tx = client
+            .build_transaction()
+            .isolation_level(IsolationLevel::Serializable)
+            .start()
+            .await?;
 
-/// Infsrv node task type.
-pub enum TaskType {
-    Segment,
-    Transcribe,
+        use Error::*;
+        let Some(mut user) = User::get(&tx, user).await? else {
+            return Err(UserNotFound(user));
+        };
+
+        if !user.balance.is_sign_positive() {
+            return Err(Error::NotEnoughBalance);
+        }
+
+        let Some(mut node) = Node::find_one_with_available_resources(&tx, compute, memory).await?
+        else {
+            return Err(NotEnoughResources);
+        };
+
+        node.compute_load += compute;
+        node.memory_load += memory;
+        node.update(&tx).await?;
+
+        user.allocated_fee += fee;
+        user.update(&tx).await?;
+
+        tx.commit().await?;
+        Ok(node)
+    }
 }
 
 /// Infsrv node resource allocation.
-pub struct Allocation<S: Store> {
+pub struct Allocation {
     id: Uuid,
-    capabilities: Vec<String>,
     ip_address: IpAddr,
-    _ledger: Arc<Ledger<S>>,
+    capabilities: Vec<String>,
+    pool: Pool,
+    user: Uuid,
+    node: Uuid,
+    compute: u32,
+    memory: u32,
+    fee: Decimal,
 }
 
-impl<S: Store> Allocation<S> {
-    /// Allocated resource UUID.
-    pub fn id(&self) -> Uuid {
-        self.id
-    }
-
+impl Allocation {
     /// Allocated resource capabilities.
     pub fn capabilities(&self) -> &[String] {
         &self.capabilities
     }
 
-    /// IP address of a node where resource is allocated.
+    /// IP address of a node where the resource is allocated.
     pub fn ip_address(&self) -> IpAddr {
         self.ip_address
     }
 
-    /// Check if the resource was prematurely deallocated.
-    pub async fn check_closed(&self) -> Result<bool> {
-        // TODO: Implement this.
-        Ok(false)
+    /// Check if the resource must be deallocated.
+    pub async fn check_invalidated(&self) -> Result<bool> {
+        let client = self.pool.get().await?;
+
+        let Some(user) = User::get(&client, self.user).await? else {
+            return Err(Error::UserNotFound(self.user));
+        };
+
+        Ok(!user.balance.is_sign_positive())
+    }
+
+    async fn deallocate(
+        pool: Pool,
+        user: Uuid,
+        node: Uuid,
+        compute: u32,
+        memory: u32,
+        fee: Decimal,
+    ) -> Result<()> {
+        let mut client = pool.get().await?;
+
+        let mut interval = interval(Duration::from_millis(10));
+        let mut remains = 10000;
+
+        loop {
+            interval.tick().await;
+
+            let result =
+                Self::try_deallocate_atomically(&mut client, user, node, compute, memory, fee)
+                    .await;
+            if !is_serialization_failure(&result) {
+                break result;
+            }
+
+            remains -= 1;
+            if remains == 0 {
+                break result;
+            }
+        }
+    }
+
+    async fn try_deallocate_atomically(
+        client: &mut Client,
+        user: Uuid,
+        node: Uuid,
+        compute: u32,
+        memory: u32,
+        fee: Decimal,
+    ) -> Result<()> {
+        let tx = client
+            .build_transaction()
+            .isolation_level(IsolationLevel::Serializable)
+            .start()
+            .await?;
+
+        use Error::*;
+        let Some(mut node) = Node::get(&tx, node).await? else {
+            return Err(NodeNotFound(node));
+        };
+
+        node.compute_load -= compute;
+        node.memory_load -= memory;
+        node.update(&tx).await?;
+
+        let Some(mut user) = User::get(&tx, user).await? else {
+            return Err(UserNotFound(user));
+        };
+
+        user.allocated_fee -= fee;
+        user.update(&tx).await?;
+
+        tx.commit().await?;
+        Ok(())
     }
 }
 
-impl<S: Store> Drop for Allocation<S> {
+impl Drop for Allocation {
     fn drop(&mut self) {
+        debug!("deallocating {}", self.id);
+
         let id = self.id;
-        let ledger = self._ledger.clone();
+        let pool = self.pool.clone();
+        let user = self.user;
+        let node = self.node;
+        let compute = self.compute;
+        let memory = self.memory;
+        let fee = self.fee;
+
         tokio::spawn(async move {
-            let _ = ledger.deallocate(id).await;
+            if let Err(err) = Self::deallocate(pool, user, node, compute, memory, fee).await {
+                error!("failed to deallocate {id}: {err:#}");
+            } else {
+                debug!("deallocated {id}");
+            }
         });
     }
+}
+
+#[inline]
+fn is_serialization_failure<T>(error: &Result<T>) -> bool {
+    const SQL_STATE: Option<&SqlState> = Some(&SqlState::T_R_SERIALIZATION_FAILURE);
+    use Error::*;
+    matches!(error, Err(Data(crate::data::Error::Postgres(e))) if e.code() == SQL_STATE)
+        || matches!(error, Err(Postgres(e)) if e.code() == SQL_STATE)
 }

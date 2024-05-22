@@ -1,16 +1,13 @@
-use crate::{
-    ledger::{Ledger, TaskType},
-    postgres::PostgresStore,
-};
+use crate::{data::capability::TaskType, ledger::Ledger, util::fmt::TruncateDebug};
 use axum::http::header::CONTENT_TYPE;
 use futures::{SinkExt, StreamExt};
-use log::debug;
+use log::{debug, error};
 use reqwest::{
     multipart::{Form, Part},
     Client,
 };
 use serde::Deserialize;
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
     time::interval,
@@ -70,12 +67,12 @@ pub struct TranscribeItem {
 
 /// Pool of infsrv instances.
 pub struct InfsrvPool {
-    ledger: Arc<Ledger<PostgresStore>>,
+    ledger: Ledger,
 }
 
 impl InfsrvPool {
     /// Create a new InfsrvPool instance.
-    pub fn new(ledger: Arc<Ledger<PostgresStore>>) -> Self {
+    pub fn new(ledger: Ledger) -> Self {
         Self { ledger }
     }
 
@@ -92,7 +89,6 @@ impl InfsrvPool {
             .ledger
             .allocate(user, tariff, TaskType::Segment)
             .await?;
-        debug!("created allocation {}", allocation.id());
 
         let mut url = Url::parse("ws://127.0.0.1:9322/segment").unwrap();
         url.set_ip_host(allocation.ip_address()).unwrap();
@@ -125,26 +121,28 @@ impl InfsrvPool {
             closed_interval.tick().await;
             loop {
                 tokio::select! {
-                    Some(pcm) = receiver.recv() => {
+                    maybe_pcm = receiver.recv() => {
+                        let Some(pcm) = maybe_pcm else {
+                            break;
+                        };
                         if let Err(err) = ws_sender.send(Message::binary(pcm)).await {
                             debug!("failed to send pcm to infsrv ws: {err:#}");
                             break;
                         }
                     },
                     _ = closed_interval.tick() => {
-                        match allocation.check_closed().await {
+                        match allocation.check_invalidated().await {
                             Ok(true) => {
-                                debug!("detected allocation {} closed", allocation.id());
+                                debug!("detected allocation closed");
                                 break;
                             }
                             Err(err) => {
-                                debug!("failed to check if allocation closed: {:#}", err);
+                                error!("failed to check if allocation closed: {:#}", err);
                                 break;
                             }
                             _ => {},
                         }
                     }
-                    else => break,
                 }
             }
 
@@ -175,7 +173,7 @@ impl InfsrvPool {
                         break;
                     }
                     Ok(msg) => {
-                        debug!("ignoring infsrv ws msg {msg:?}");
+                        debug!("ignoring infsrv ws msg {:?}", TruncateDebug::new(&msg));
                         continue;
                     }
                     Err(err) => {
@@ -204,7 +202,6 @@ impl InfsrvPool {
             .ledger
             .allocate(user, tariff, TaskType::Transcribe)
             .await?;
-        debug!("created allocation {}", allocation.id());
 
         let mut form = Form::new().part("file", Part::bytes(wav_blob).file_name("file.wav"));
 

@@ -20,6 +20,8 @@ impl FromRequestParts<Arc<Server>> for Auth {
         _parts: &mut Parts,
         _server: &Arc<Server>,
     ) -> StdResult<Self, Self::Rejection> {
-        Ok(Self { user: Uuid::nil() })
+        Ok(Self {
+            user: Uuid::parse_str("61abe888-3947-4dc6-9db7-ede01a1618e2").unwrap(),
+        })
     }
 }

@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 axum = { workspace = true }
 clap = { workspace = true }
+deadpool-postgres = { workspace = true }
 env_logger = { workspace = true }
 futures = { workspace = true }
 hound = { workspace = true }
@@ -13,11 +14,15 @@ log = { workspace = true }
 ogg = { workspace = true }
 reqwest = { workspace = true }
 rubato = { workspace = true }
+rust_decimal = { workspace = true }
+postgres-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 symphonia = { workspace = true }
 thiserror = { workspace = true }
+time = { workspace = true }
 tokio = { workspace = true }
+tokio-postgres = { workspace = true }
 tokio-tungstenite = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true }

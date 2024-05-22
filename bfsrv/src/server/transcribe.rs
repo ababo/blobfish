@@ -3,6 +3,7 @@ use crate::{
         Result as InfsrvResult, SegmentItem, MAX_SEGMENT_DURATION, SAMPLE_RATE, TERMINATOR_HEADER,
     },
     server::{middleware::Auth, Error, Result, Server},
+    util::fmt::TruncateDebug,
 };
 use axum::{
     extract::{
@@ -331,9 +332,14 @@ impl AudioStreamProcessor {
         }
         debug!("finished processing client audio stream");
 
+        drop(packet_reader);
         let mut client_receiver = join_handle.await.unwrap();
+
         while let Some(Ok(msg)) = client_receiver.next().await {
-            debug!("ignoring client ws post-audio msg {msg:?}");
+            debug!(
+                "ignoring client ws post-audio msg {:?}",
+                TruncateDebug::new(&msg)
+            );
         }
         debug!("finished to read post-audio client ws");
     }
@@ -375,7 +381,7 @@ impl AudioStreamProcessor {
                         break;
                     }
                     Ok(msg) => {
-                        debug!("ignoring client ws msg {msg:?}");
+                        debug!("ignoring client ws msg {:?}", TruncateDebug::new(&msg));
                     }
                     Err(err) => {
                         debug!("failed to read client ws: {err:#}");
