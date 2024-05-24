@@ -7,7 +7,10 @@ use deadpool_postgres::{Client, Pool};
 use log::{debug, error};
 use rust_decimal::Decimal;
 use std::{net::IpAddr, time::Duration};
-use tokio::time::interval;
+use tokio::{
+    sync::oneshot::{channel, Sender},
+    time::interval,
+};
 use tokio_postgres::{error::SqlState, IsolationLevel};
 use uuid::Uuid;
 
@@ -33,8 +36,12 @@ pub enum Error {
 impl Error {
     /// Whether it's internal error.
     pub fn is_internal(&self) -> bool {
-        // TODO: Check between variants when they are added.
-        true
+        use Error::*;
+        match self {
+            Data(_) | DeadpoolPool(_) | NodeNotFound(_) | Postgres(_) | NotEnoughResources
+            | UserNotFound(_) => true,
+            NotEnoughBalance => false,
+        }
     }
 }
 
@@ -44,12 +51,37 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// Node usage ledger.
 pub struct Ledger {
     pool: Pool,
+    stop_sender: Option<Sender<()>>,
 }
 
 impl Ledger {
     /// Create a new Ledger instance.
     pub fn new(pool: Pool) -> Self {
-        Self { pool }
+        let (stop_sender, mut stop_receiver) = channel::<()>();
+
+        let pool_cloned = pool.clone();
+        let mut interval = interval(Duration::from_secs(1));
+        tokio::spawn(async move {
+            interval.tick().await;
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if let Err(err) = update_balances(&pool_cloned).await {
+                            error!("failed to update user balances: {err:#}");
+                        }
+                    },
+                    _ = &mut stop_receiver => {
+                        debug!("stopped updating user balances");
+                        break;
+                    }
+                }
+            }
+        });
+
+        Self {
+            pool,
+            stop_sender: Some(stop_sender),
+        }
     }
 
     /// Allocate a node resource.
@@ -272,6 +304,18 @@ impl Drop for Allocation {
             }
         });
     }
+}
+
+impl Drop for Ledger {
+    fn drop(&mut self) {
+        let stop_sender = self.stop_sender.take().unwrap();
+        stop_sender.send(()).unwrap()
+    }
+}
+
+async fn update_balances(pool: &Pool) -> Result<()> {
+    let client = pool.get().await?;
+    User::update_balances(&client).await.map_err(Into::into)
 }
 
 #[inline]

@@ -336,6 +336,14 @@ impl AudioStreamProcessor {
         let mut client_receiver = join_handle.await.unwrap();
 
         while let Some(Ok(msg)) = client_receiver.next().await {
+            use Message::*;
+            if let Binary(_) | Text(_) = msg {
+                debug!(
+                    "unexpected client ws post-audio msg {:?}",
+                    TruncateDebug::new(&msg)
+                );
+                break;
+            }
             debug!(
                 "ignoring client ws post-audio msg {:?}",
                 TruncateDebug::new(&msg)

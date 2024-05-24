@@ -21,6 +21,7 @@
         "levelname",
         "lpcm",
         "msecs",
+        "oneshot",
         "openai",
         "pyannote",
         "reqwest",

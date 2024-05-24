@@ -58,6 +58,22 @@ impl User {
         Ok(())
     }
 
+    /// Decrement user balances with corresponding allocated fees.
+    pub async fn update_balances(client: &impl GenericClient) -> Result<()> {
+        let stmt = client
+            .prepare_cached(
+                r#"
+                UPDATE "user"
+                   SET balance = balance - allocated_fee
+                 WHERE allocated_fee > 0 -- use user_allocated_fee_idx
+                "#,
+            )
+            .await
+            .unwrap();
+        client.execute(&stmt, &[]).await?;
+        Ok(())
+    }
+
     fn from_row(row: Row) -> Result<Self> {
         Ok(Self {
             id: row.try_get("id")?,
