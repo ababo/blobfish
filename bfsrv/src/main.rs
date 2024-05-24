@@ -38,8 +38,8 @@ async fn run(config: Arc<Config>) -> Result<()> {
         .create_pool(Some(Runtime::Tokio1), NoTls)
         .unwrap();
 
-    let ledger = Ledger::new(pool);
-    let server = Arc::new(Server::new(config.clone(), InfsrvPool::new(ledger)));
+    let ledger = Ledger::new(pool.clone());
+    let server = Arc::new(Server::new(config.clone(), pool, InfsrvPool::new(ledger)));
     let server_handle = tokio::spawn(async move {
         server
             .serve(&config.server_address, shutdown_signal())

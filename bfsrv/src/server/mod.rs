@@ -11,6 +11,7 @@ use axum::{
     routing::get,
     Router,
 };
+use deadpool_postgres::Pool;
 use log::{debug, error, info};
 use std::{future::Future, net::SocketAddr, sync::Arc};
 
@@ -21,17 +22,23 @@ pub enum Error {
     Axum(#[from] axum::Error),
     #[error("bad request: {0}")]
     BadRequest(String),
+    #[error("data: {0}")]
+    Data(#[from] crate::data::Error),
+    #[error("deadpool pool: {0}")]
+    DeadpoolPool(#[from] deadpool_postgres::PoolError),
     #[error("infsrv pool: {0}")]
     InfsrvPool(#[from] infsrv_pool::Error),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+    #[error("unauthorized: {0}")]
+    Unauthorized(String),
 }
 
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
         use Error::*;
         let status = match &self {
-            Axum(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Axum(_) | Data(_) | DeadpoolPool(_) => StatusCode::INTERNAL_SERVER_ERROR,
             BadRequest(_) => StatusCode::BAD_REQUEST,
             InfsrvPool(err) => {
                 use infsrv_pool::Error::*;
@@ -49,6 +56,7 @@ impl IntoResponse for Error {
                 }
             }
             Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Unauthorized(_) => StatusCode::UNAUTHORIZED,
         };
 
         if status == StatusCode::INTERNAL_SERVER_ERROR {
@@ -68,14 +76,16 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// HTTP/WS server for Handler.
 pub struct Server {
     _config: Arc<Config>,
+    pool: Pool,
     infsrv_pool: InfsrvPool,
 }
 
 impl Server {
     /// Create a new Server instance.
-    pub fn new(_config: Arc<Config>, infsrv_pool: InfsrvPool) -> Self {
+    pub fn new(_config: Arc<Config>, pool: Pool, infsrv_pool: InfsrvPool) -> Self {
         Self {
             _config,
+            pool,
             infsrv_pool,
         }
     }

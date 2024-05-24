@@ -84,7 +84,7 @@ pub async fn handle_transcribe(
 
     let (infsrv_sender, infsrv_receiver) = server
         .infsrv_pool
-        .segment(auth.user, &query.tariff, terminator.as_deref())
+        .segment(auth.token.user, &query.tariff, terminator.as_deref())
         .await?;
 
     Ok(ws.on_upgrade(move |client_ws| async {
@@ -189,7 +189,7 @@ async fn process_segments(
         let result = server
             .infsrv_pool
             .transcribe(
-                auth.user,
+                auth.token.user,
                 query.tariff.as_str(),
                 wav_blob,
                 query.lang.as_ref().cloned(),

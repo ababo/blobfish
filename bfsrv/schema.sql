@@ -1,3 +1,5 @@
+CREATE EXTENSION pgcrypto;
+
 CREATE TABLE "user"(
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   created_at timestamp NOT NULL DEFAULT now(),
@@ -8,6 +10,16 @@ CREATE TABLE "user"(
 CREATE INDEX user_allocated_fee_idx ON "user"(allocated_fee)
 WHERE
   allocated_fee > 0;
+
+CREATE TABLE token(
+  id uuid PRIMARY KEY,
+  hash text NOT NULL,
+  created_at timestamp NOT NULL DEFAULT now(),
+  "user" uuid NOT NULL,
+  is_admin boolean NOT NULL
+);
+
+CREATE INDEX token_user_idx ON token("user");
 
 CREATE TABLE capability(
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -57,6 +69,18 @@ VALUES
     '2024-05-22T17:33:00',
     10,
     0
+  );
+
+INSERT INTO
+  token
+VALUES
+  (
+    -- Authorization: Bearer QKvO9M1eSniqWjAsQQO9snP2IWWsggdV0l8/jCqgATpOyYUZpuAcOjyt8YJcKjxN
+    '40abcef4-cd5e-4a78-aa5a-302c4103bdb2',
+    '$2a$06$7CYjgqKs8AAjJ4aSrDhOvucRa07XM4HbyEzky7l4KbG2e.MNVDxOy',
+    '2024-05-22T17:33:00',
+    '61abe888-3947-4dc6-9db7-ede01a1618e2',
+    'true'
   );
 
 INSERT INTO

@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 axum = { workspace = true }
+base64 = { workspace = true }
 clap = { workspace = true }
 deadpool-postgres = { workspace = true }
 env_logger = { workspace = true }

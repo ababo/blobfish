@@ -23,6 +23,7 @@
         "msecs",
         "oneshot",
         "openai",
+        "pgcrypto",
         "pyannote",
         "reqwest",
         "resampler",
