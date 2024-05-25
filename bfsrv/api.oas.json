@@ -1,0 +1,303 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Blobfish API",
+    "version": "1.0.0",
+    "description": "Speech-to-text streaming transcription service.",
+    "contact": {
+      "email": "support@blobfish.ai",
+      "name": "Support"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://blobfish.ai",
+      "description": "Blobfish API Server"
+    }
+  ],
+  "security": [
+    {
+      "BearerAuth": []
+    }
+  ],
+  "paths": {
+    "/transcribe": {
+      "get": {
+        "summary": "Transcribe audio stream through websocket (WSS URL scheme).",
+        "description": "User sends a binary audio stream (currently supported Ogg Vorbis only) and receives text messages that contain JSON-encoded segments.<br><br>Examples:<ul><li>sox -d -t vorbis -q - | websocat -b &quot;wss://blobfish.ai/transcribe?tariff=basic&amp;lang=en&quot; -H &quot;Content-Type: audio/ogg; codecs=vorbis&quot; -H &quot;Authorization: Bearer $ACCESS_TOKEN&quot;<br><br></li><li>{ cat recording.ogg; printf &quot;I&#39;ll be back&quot; } | websocat -b &quot;wss://blobfish.ai/transcribe?tariff=basic&amp;lang=en&quot; -H &quot;Content-Type: audio/ogg; codecs=vorbis&quot; -H &quot;X-Blobfish-Terminator: I&#39;ll be back&quot; -H &quot;Authorization: Bearer $ACCESS_TOKEN&quot; --no-close</li></ul>",
+        "parameters": [
+          {
+            "name": "Content-Type",
+            "in": "header",
+            "description": "Request content type.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "audio/ogg; codecs=vorbis"
+              ]
+            }
+          },
+          {
+            "name": "X-Blobfish-Terminator",
+            "in": "header",
+            "description": "A boundary that designates end of audio stream.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tariff",
+            "in": "query",
+            "description": "Transcription tariff.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "basic"
+              ]
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "description": "Speech language.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "af",
+                "am",
+                "ar",
+                "as",
+                "az",
+                "ba",
+                "be",
+                "bg",
+                "bn",
+                "bo",
+                "br",
+                "bs",
+                "ca",
+                "cs",
+                "cy",
+                "da",
+                "de",
+                "el",
+                "en",
+                "es",
+                "et",
+                "eu",
+                "fa",
+                "fi",
+                "fo",
+                "fr",
+                "gl",
+                "gu",
+                "ha",
+                "haw",
+                "he",
+                "hi",
+                "hr",
+                "ht",
+                "hu",
+                "hy",
+                "id",
+                "is",
+                "it",
+                "ja",
+                "jw",
+                "ka",
+                "kk",
+                "km",
+                "kn",
+                "ko",
+                "la",
+                "lb",
+                "ln",
+                "lo",
+                "lt",
+                "lv",
+                "mg",
+                "mi",
+                "mk",
+                "ml",
+                "mn",
+                "mr",
+                "ms",
+                "mt",
+                "my",
+                "ne",
+                "nl",
+                "nn",
+                "no",
+                "oc",
+                "pa",
+                "pl",
+                "ps",
+                "pt",
+                "ro",
+                "ru",
+                "sa",
+                "sd",
+                "si",
+                "sk",
+                "sl",
+                "sn",
+                "so",
+                "sq",
+                "sr",
+                "su",
+                "sv",
+                "sw",
+                "ta",
+                "te",
+                "tg",
+                "th",
+                "tk",
+                "tl",
+                "tr",
+                "tt",
+                "uk",
+                "ur",
+                "uz",
+                "vi",
+                "yi",
+                "yo",
+                "zh",
+                "yue"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Connection is upgraded to websocket.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "begin": {
+                      "type": "number",
+                      "description": "Start time of the segment, in seconds.",
+                      "example": 12.345
+                    },
+                    "end": {
+                      "type": "number",
+                      "description": "End time of the segment, in seconds.",
+                      "example": 23.456
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "Segment transcription.",
+                      "example": "To be or not to be, that is the question..."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "User sent a malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "description": "Human readable error description.",
+                      "example": "Everything's wrong bro."
+                    },
+                    "code": {
+                      "type": "number",
+                      "description": "Error code.",
+                      "example": 1234
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "User does not have enough balance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "description": "Human readable error description.",
+                      "example": "Everything's wrong bro."
+                    },
+                    "code": {
+                      "type": "number",
+                      "description": "Error code.",
+                      "example": 1234
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "User cannot be authorized or authenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "description": "Human readable error description.",
+                      "example": "Everything's wrong bro."
+                    },
+                    "code": {
+                      "type": "number",
+                      "description": "Error code.",
+                      "example": 1234
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server has failed to process request due to internal error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "description": "Human readable error description.",
+                      "example": "Everything's wrong bro."
+                    },
+                    "code": {
+                      "type": "number",
+                      "description": "Error code.",
+                      "example": 1234
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "Access token"
+      }
+    }
+  }
+}
