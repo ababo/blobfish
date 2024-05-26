@@ -20,6 +20,7 @@ pub struct Capability {
     pub compute_load: u32,
     pub memory_load: u32,
     pub fee: Decimal,
+    pub languages: Option<String>,
 }
 
 impl Capability {
@@ -52,6 +53,7 @@ impl Capability {
             compute_load: row.try_get::<'_, _, i32>("compute_load")? as u32,
             memory_load: row.try_get::<'_, _, i32>("memory_load")? as u32,
             fee: row.try_get("fee")?,
+            languages: row.try_get("languages")?,
         })
     }
 }

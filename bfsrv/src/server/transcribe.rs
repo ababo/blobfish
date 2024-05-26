@@ -1,4 +1,5 @@
 use crate::{
+    data::capability::{Capability, TaskType},
     infsrv_pool::{
         Result as InfsrvResult, SegmentItem, MAX_SEGMENT_DURATION, SAMPLE_RATE, TERMINATOR_HEADER,
     },
@@ -75,6 +76,28 @@ pub async fn handle_transcribe(
 
     if headers.get(CONTENT_TYPE) != Some(&HeaderValue::from_static(VORBIS_CONTENT_TYPE)) {
         return Err(Error::BadRequest("unsupported content type".to_owned()));
+    }
+
+    let capabilities = {
+        let client = server.pool.get().await?;
+        Capability::find_with_task_type_and_tariff(&client, TaskType::Transcribe, &query.tariff)
+            .await?
+    };
+    if capabilities.is_empty() {
+        return Err(Error::BadRequest("unknown tariff".to_owned()));
+    };
+    if let Some(lang) = &query.lang {
+        if capabilities
+            .iter()
+            .filter_map(|c| {
+                c.languages
+                    .as_ref()
+                    .map(|l| l.split(',').any(|c| c == lang))
+            })
+            .any(|b| !b)
+        {
+            return Err(Error::BadRequest("unsupported language".to_owned()));
+        }
     }
 
     let terminator = headers.get(TERMINATOR_HEADER).map(|v| {
