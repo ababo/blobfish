@@ -7,14 +7,20 @@ mod util;
 
 use crate::{config::Config, ledger::Ledger};
 use clap::Parser;
-use deadpool_postgres::{Config as DeadpoolClient, ManagerConfig, RecyclingMethod, Runtime};
+use data::{node::Node, user::User};
+use deadpool_postgres::{Config as DeadpoolClient, ManagerConfig, Pool, RecyclingMethod, Runtime};
 use infsrv_pool::InfsrvPool;
 use server::Server;
 use std::{future::Future, sync::Arc};
 use tokio_postgres::NoTls;
 
 #[derive(Debug, thiserror::Error)]
-enum Error {}
+enum Error {
+    #[error("data: {0}")]
+    Data(#[from] crate::data::Error),
+    #[error("deadpool pool: {0}")]
+    DeadpoolPool(#[from] deadpool_postgres::PoolError),
+}
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -29,14 +35,7 @@ async fn main() {
 async fn run(config: Arc<Config>) -> Result<()> {
     env_logger::builder().format_timestamp_millis().init();
 
-    let mut deadpool_config = DeadpoolClient::new();
-    deadpool_config.url = Some(config.database_url.to_string());
-    deadpool_config.manager = Some(ManagerConfig {
-        recycling_method: RecyclingMethod::Fast,
-    });
-    let pool = deadpool_config
-        .create_pool(Some(Runtime::Tokio1), NoTls)
-        .unwrap();
+    let pool = create_pool(&config).await?;
 
     let ledger = Ledger::new(pool.clone());
     let server = Arc::new(Server::new(config.clone(), pool, InfsrvPool::new(ledger)));
@@ -51,6 +50,23 @@ async fn run(config: Arc<Config>) -> Result<()> {
     server_result.expect("failed to join HTTP/WS server");
 
     Ok(())
+}
+
+async fn create_pool(config: &Config) -> Result<Pool> {
+    let mut deadpool_config = DeadpoolClient::new();
+    deadpool_config.url = Some(config.database_url.to_string());
+    deadpool_config.manager = Some(ManagerConfig {
+        recycling_method: RecyclingMethod::Fast,
+    });
+    let pool = deadpool_config
+        .create_pool(Some(Runtime::Tokio1), NoTls)
+        .unwrap();
+
+    let client = pool.get().await?;
+    Node::clear_loads(&client).await?;
+    User::clear_allocated_fees(&client).await?;
+
+    Ok(pool)
 }
 
 fn shutdown_signal() -> impl Future<Output = ()> + Unpin {

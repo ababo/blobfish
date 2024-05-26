@@ -74,6 +74,21 @@ impl User {
         Ok(())
     }
 
+    /// Clear allocated_fee for every user.
+    pub async fn clear_allocated_fees(client: &impl GenericClient) -> Result<()> {
+        let stmt = client
+            .prepare_cached(
+                r#"
+                UPDATE "user"
+                   SET allocated_fee = 0
+                "#,
+            )
+            .await
+            .unwrap();
+        client.execute(&stmt, &[]).await?;
+        Ok(())
+    }
+
     fn from_row(row: Row) -> Result<Self> {
         Ok(Self {
             id: row.try_get("id")?,

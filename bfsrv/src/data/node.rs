@@ -91,6 +91,22 @@ impl Node {
         Ok(())
     }
 
+    /// Clear compute_load and memory_load for every node.
+    pub async fn clear_loads(client: &impl GenericClient) -> Result<()> {
+        let stmt = client
+            .prepare_cached(
+                "
+                UPDATE node
+                   SET compute_load = 0,
+                       memory_load = 0
+                ",
+            )
+            .await
+            .unwrap();
+        client.execute(&stmt, &[]).await?;
+        Ok(())
+    }
+
     fn from_row(row: Row) -> Result<Self> {
         Ok(Self {
             id: row.try_get("id")?,
