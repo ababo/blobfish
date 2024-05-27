@@ -1,9 +1,9 @@
 {
-  "openapi": "3.0.0",
+  "openapi": "3.1.0",
   "info": {
     "title": "Blobfish API",
     "version": "1.0.0",
-    "description": "Speech-to-text streaming transcription service.",
+    "summary": "Speech-to-text streaming transcription service.",
     "contact": {
       "email": "support@blobfish.ai",
       "name": "Support"
@@ -15,16 +15,280 @@
       "description": "Blobfish API Server"
     }
   ],
-  "security": [
-    {
-      "BearerAuth": []
-    }
-  ],
   "paths": {
+    "/payment": {
+      "patch": {
+        "summary": "Top up user's balance by confirming completed payment.",
+        "description": "This method makes the backend check status of the payment and top up balance if it's completed.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reference": {
+                    "summary": "Payment reference returned by /payment POST.",
+                    "type": "string",
+                    "examples": [
+                      "5JJ76501HR1068729"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Returns a payment status. If it's \"completed\" then the payment is confirmed and the balance has been topped up.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "description": "Status.",
+                      "type": "string",
+                      "enum": [
+                        "new",
+                        "canceled",
+                        "completed"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error occurred.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "summary": "Human readable error description.",
+                      "examples": [
+                        "Everything's wrong bro."
+                      ]
+                    },
+                    "code": {
+                      "type": "number",
+                      "summary": "Error code.",
+                      "examples": [
+                        1234
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error occurred.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "summary": "Human readable error description.",
+                      "examples": [
+                        "Everything's wrong bro."
+                      ]
+                    },
+                    "code": {
+                      "type": "number",
+                      "summary": "Error code.",
+                      "examples": [
+                        1234
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a new payment.",
+        "description": "User creates a new payment by specifying the related details, then follows a URL that is returned to complete it.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "currency": {
+                    "summary": "Payment currency.",
+                    "type": "string",
+                    "examples": [
+                      "USD"
+                    ]
+                  },
+                  "amount": {
+                    "summary": "Payment amount.",
+                    "type": "number",
+                    "examples": [
+                      12.34
+                    ]
+                  },
+                  "processor": {
+                    "summary": "Payment processor (currently only Paypal is supported).",
+                    "type": "string",
+                    "enum": [
+                      "paypal"
+                    ]
+                  },
+                  "to_user": {
+                    "summary": "Receiving user UUID (the calling user if omitted)",
+                    "type": "string",
+                    "examples": [
+                      "40d3699b-85b9-45fd-8d93-26f3832e7717"
+                    ]
+                  },
+                  "locale": {
+                    "summary": "Payment page locale.",
+                    "default": "en-US"
+                  }
+                },
+                "required": [
+                  "currency",
+                  "amount",
+                  "processor"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Payment is created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "reference": {
+                      "summary": "Payment ID registered at the specified processor.",
+                      "type": "string",
+                      "examples": [
+                        "5JJ76501HR1068729"
+                      ]
+                    },
+                    "url": {
+                      "summary": "URL to follow for payment completion.",
+                      "type": "string",
+                      "examples": [
+                        "https://www.paypal.com/checkoutnow?token=5JJ76501HR1068729"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error occurred.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "summary": "Human readable error description.",
+                      "examples": [
+                        "Everything's wrong bro."
+                      ]
+                    },
+                    "code": {
+                      "type": "number",
+                      "summary": "Error code.",
+                      "examples": [
+                        1234
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error occurred.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "summary": "Human readable error description.",
+                      "examples": [
+                        "Everything's wrong bro."
+                      ]
+                    },
+                    "code": {
+                      "type": "number",
+                      "summary": "Error code.",
+                      "examples": [
+                        1234
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error occurred.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "summary": "Human readable error description.",
+                      "examples": [
+                        "Everything's wrong bro."
+                      ]
+                    },
+                    "code": {
+                      "type": "number",
+                      "summary": "Error code.",
+                      "examples": [
+                        1234
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/transcribe": {
       "get": {
         "summary": "Transcribe audio stream through websocket (WSS URL scheme).",
         "description": "User sends a binary audio stream (currently supported Ogg Vorbis only) and receives text messages that contain JSON-encoded segments.<br><br>Examples:<ul><li>sox -d -t vorbis -q - | websocat -b &quot;wss://blobfish.ai/transcribe?tariff=basic&amp;lang=en&quot; -H &quot;Content-Type: audio/ogg; codecs=vorbis&quot; -H &quot;Authorization: Bearer $ACCESS_TOKEN&quot;<br><br></li><li>{ cat recording.ogg; printf &quot;I&#39;ll be back&quot; } | websocat -b &quot;wss://blobfish.ai/transcribe?tariff=basic&amp;lang=en&quot; -H &quot;Content-Type: audio/ogg; codecs=vorbis&quot; -H &quot;X-Blobfish-Terminator: I&#39;ll be back&quot; -H &quot;Authorization: Bearer $ACCESS_TOKEN&quot; --no-close</li></ul>",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
         "parameters": [
           {
             "name": "Content-Type",
@@ -181,18 +445,24 @@
                   "properties": {
                     "begin": {
                       "type": "number",
-                      "description": "Start time of the segment, in seconds.",
-                      "example": 12.345
+                      "summary": "Start time of the segment, in seconds.",
+                      "examples": [
+                        12.345
+                      ]
                     },
                     "end": {
                       "type": "number",
-                      "description": "End time of the segment, in seconds.",
-                      "example": 23.456
+                      "summary": "End time of the segment, in seconds.",
+                      "examples": [
+                        23.456
+                      ]
                     },
                     "text": {
                       "type": "string",
-                      "description": "Segment transcription.",
-                      "example": "To be or not to be, that is the question..."
+                      "summary": "Segment transcription.",
+                      "examples": [
+                        "To be or not to be, that is the question..."
+                      ]
                     }
                   }
                 }
@@ -200,7 +470,7 @@
             }
           },
           "401": {
-            "description": "User sent a malformed request.",
+            "description": "Error occurred.",
             "content": {
               "application/json": {
                 "schema": {
@@ -208,13 +478,17 @@
                   "properties": {
                     "error": {
                       "type": "string",
-                      "description": "Human readable error description.",
-                      "example": "Everything's wrong bro."
+                      "summary": "Human readable error description.",
+                      "examples": [
+                        "Everything's wrong bro."
+                      ]
                     },
                     "code": {
                       "type": "number",
-                      "description": "Error code.",
-                      "example": 1234
+                      "summary": "Error code.",
+                      "examples": [
+                        1234
+                      ]
                     }
                   }
                 }
@@ -222,7 +496,7 @@
             }
           },
           "402": {
-            "description": "User does not have enough balance.",
+            "description": "Error occurred.",
             "content": {
               "application/json": {
                 "schema": {
@@ -230,13 +504,17 @@
                   "properties": {
                     "error": {
                       "type": "string",
-                      "description": "Human readable error description.",
-                      "example": "Everything's wrong bro."
+                      "summary": "Human readable error description.",
+                      "examples": [
+                        "Everything's wrong bro."
+                      ]
                     },
                     "code": {
                       "type": "number",
-                      "description": "Error code.",
-                      "example": 1234
+                      "summary": "Error code.",
+                      "examples": [
+                        1234
+                      ]
                     }
                   }
                 }
@@ -244,7 +522,7 @@
             }
           },
           "403": {
-            "description": "User cannot be authorized or authenticated.",
+            "description": "Error occurred.",
             "content": {
               "application/json": {
                 "schema": {
@@ -252,13 +530,17 @@
                   "properties": {
                     "error": {
                       "type": "string",
-                      "description": "Human readable error description.",
-                      "example": "Everything's wrong bro."
+                      "summary": "Human readable error description.",
+                      "examples": [
+                        "Everything's wrong bro."
+                      ]
                     },
                     "code": {
                       "type": "number",
-                      "description": "Error code.",
-                      "example": 1234
+                      "summary": "Error code.",
+                      "examples": [
+                        1234
+                      ]
                     }
                   }
                 }
@@ -266,7 +548,7 @@
             }
           },
           "500": {
-            "description": "Server has failed to process request due to internal error.",
+            "description": "Error occurred.",
             "content": {
               "application/json": {
                 "schema": {
@@ -274,13 +556,17 @@
                   "properties": {
                     "error": {
                       "type": "string",
-                      "description": "Human readable error description.",
-                      "example": "Everything's wrong bro."
+                      "summary": "Human readable error description.",
+                      "examples": [
+                        "Everything's wrong bro."
+                      ]
                     },
                     "code": {
                       "type": "number",
-                      "description": "Error code.",
-                      "example": 1234
+                      "summary": "Error code.",
+                      "examples": [
+                        1234
+                      ]
                     }
                   }
                 }
@@ -296,7 +582,35 @@
       "BearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "bearerFormat": "Access token"
+        "bearerFormat": "Access token."
+      }
+    },
+    "responses": {
+      "ErrorResponse": {
+        "description": "Error occurred.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string",
+                  "summary": "Human readable error description.",
+                  "examples": [
+                    "Everything's wrong bro."
+                  ]
+                },
+                "code": {
+                  "type": "number",
+                  "summary": "Error code.",
+                  "examples": [
+                    1234
+                  ]
+                }
+              }
+            }
+          }
+        }
       }
     }
   }
