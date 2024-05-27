@@ -1,5 +1,6 @@
 pub mod capability;
 pub mod node;
+pub mod payment;
 pub mod token;
 pub mod user;
 

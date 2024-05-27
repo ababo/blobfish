@@ -1,6 +1,6 @@
 use crate::data::Result;
 use deadpool_postgres::GenericClient;
-use time::PrimitiveDateTime;
+use time::OffsetDateTime;
 use tokio_postgres::Row;
 use uuid::Uuid;
 
@@ -8,7 +8,7 @@ use uuid::Uuid;
 pub struct Token {
     pub id: Uuid,
     pub hash: String,
-    pub created_at: PrimitiveDateTime,
+    pub created_at: OffsetDateTime,
     pub user: Uuid,
     pub is_admin: bool,
 }
@@ -22,11 +22,11 @@ impl Token {
     ) -> Result<Option<Token>> {
         let stmt = client
             .prepare_cached(
-                r#"
+                "
                 SELECT *
                   FROM token
                  WHERE id = $1 AND hash = crypt($2, hash)
-                "#,
+                ",
             )
             .await
             .unwrap();

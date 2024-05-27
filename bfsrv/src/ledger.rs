@@ -154,7 +154,7 @@ impl Ledger {
     ) -> Result<Node> {
         let tx = client
             .build_transaction()
-            .isolation_level(IsolationLevel::Serializable)
+            .isolation_level(IsolationLevel::RepeatableRead)
             .start()
             .await?;
 
@@ -259,7 +259,7 @@ impl Allocation {
     ) -> Result<()> {
         let tx = client
             .build_transaction()
-            .isolation_level(IsolationLevel::Serializable)
+            .isolation_level(IsolationLevel::RepeatableRead)
             .start()
             .await?;
 

@@ -1,14 +1,17 @@
 mod middleware;
+mod payment;
 mod transcribe;
 
 use crate::{
     config::Config,
+    currency_converter::CurrencyConverter,
     infsrv_pool::{self, InfsrvPool},
+    paypal::PaypalProcessor,
 };
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, patch, post},
     Router,
 };
 use deadpool_postgres::Pool;
@@ -22,14 +25,24 @@ pub enum Error {
     Axum(#[from] axum::Error),
     #[error("bad request: {0}")]
     BadRequest(String),
+    #[error("currency converter: {0}")]
+    CurrencyConverter(#[from] crate::currency_converter::Error),
     #[error("data: {0}")]
     Data(#[from] crate::data::Error),
     #[error("deadpool pool: {0}")]
     DeadpoolPool(#[from] deadpool_postgres::PoolError),
     #[error("infsrv pool: {0}")]
     InfsrvPool(#[from] infsrv_pool::Error),
+    #[error("internal: {0}")]
+    Internal(String),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+    #[error("payment not found")]
+    PaymentNotFound,
+    #[error("paypal: {0}")]
+    Paypal(#[from] crate::paypal::Error),
+    #[error("postgres: {0}")]
+    Postgres(#[from] tokio_postgres::Error),
     #[error("unauthorized: {0}")]
     Unauthorized(String),
 }
@@ -38,8 +51,9 @@ impl IntoResponse for Error {
     fn into_response(self) -> Response {
         use Error::*;
         let status = match &self {
-            Axum(_) | Data(_) | DeadpoolPool(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            BadRequest(_) => StatusCode::BAD_REQUEST,
+            Axum(_) | CurrencyConverter(_) | Data(_) | DeadpoolPool(_) | Internal(_)
+            | Postgres(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            BadRequest(_) | PaymentNotFound => StatusCode::BAD_REQUEST,
             InfsrvPool(err) => {
                 use infsrv_pool::Error::*;
                 match err {
@@ -56,6 +70,13 @@ impl IntoResponse for Error {
                 }
             }
             Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Paypal(err) => {
+                if err.is_internal() {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                } else {
+                    StatusCode::BAD_REQUEST
+                }
+            }
             Unauthorized(_) => StatusCode::UNAUTHORIZED,
         };
 
@@ -78,15 +99,27 @@ pub struct Server {
     _config: Arc<Config>,
     pool: Pool,
     infsrv_pool: InfsrvPool,
+    currency_converter: CurrencyConverter,
+    paypal: PaypalProcessor,
 }
 
 impl Server {
     /// Create a new Server instance.
-    pub fn new(_config: Arc<Config>, pool: Pool, infsrv_pool: InfsrvPool) -> Self {
+    pub fn new(config: Arc<Config>, pool: Pool, infsrv_pool: InfsrvPool) -> Self {
+        let currency_converter = CurrencyConverter::new(config.currency.clone());
+        let paypal = PaypalProcessor::new(
+            config.paypal_sandbox,
+            config.paypal_client_id.clone(),
+            config.paypal_secret_key.clone(),
+            config.paypal_return_url.clone(),
+            config.paypal_cancel_url.clone(),
+        );
         Self {
-            _config,
+            _config: config,
             pool,
             infsrv_pool,
+            currency_converter,
+            paypal,
         }
     }
 
@@ -96,6 +129,8 @@ impl Server {
         F: Future<Output = ()> + Send + 'static,
     {
         let app = Router::<Arc<Server>>::new()
+            .route("/payment", patch(payment::handle_payment_patch))
+            .route("/payment", post(payment::handle_payment_post))
             .route("/transcribe", get(transcribe::handle_transcribe))
             .with_state(self);
 

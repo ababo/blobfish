@@ -2,7 +2,7 @@ CREATE EXTENSION pgcrypto;
 
 CREATE TABLE "user"(
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  created_at timestamp NOT NULL DEFAULT now(),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
   balance decimal NOT NULL DEFAULT 0,
   allocated_fee decimal NOT NULL DEFAULT 0
 );
@@ -14,9 +14,10 @@ WHERE
 CREATE TABLE token(
   id uuid PRIMARY KEY,
   hash text NOT NULL,
-  created_at timestamp NOT NULL DEFAULT now(),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
   "user" uuid NOT NULL,
-  is_admin boolean NOT NULL
+  is_admin boolean NOT NULL,
+  FOREIGN KEY("user") REFERENCES "user"(id)
 );
 
 CREATE INDEX token_user_idx ON token("user");
@@ -61,6 +62,29 @@ CREATE TABLE node_capability(
 );
 
 CREATE INDEX node_capability_node_idx ON node_capability(node);
+
+CREATE TYPE payment_processor AS ENUM('paypal');
+
+CREATE TYPE payment_status AS ENUM('new', 'completed', 'canceled');
+
+CREATE TABLE payment(
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  status payment_status NOT NULL,
+  currency text NOT NULL,
+  amount decimal NOT NULL,
+  from_user uuid NOT NULL,
+  to_user uuid NOT NULL,
+  processor payment_processor NOT NULL,
+  reference text NOT NULL,
+  details text,
+  FOREIGN KEY(from_user) REFERENCES "user"(id),
+  FOREIGN KEY(to_user) REFERENCES "user"(id)
+);
+
+CREATE INDEX payment_from_user_idx ON payment(from_user);
+
+CREATE INDEX payment_reference_idx ON payment(reference);
 
 INSERT INTO
   "user"

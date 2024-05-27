@@ -32,12 +32,12 @@ impl Capability {
     ) -> Result<Vec<Self>> {
         let stmt = client
             .prepare_cached(
-                r#"
+                "
                 SELECT capability.*
                   FROM task_type_tariff_capability
                   JOIN capability ON capability = id
                  WHERE task_type = $1 AND tariff = $2
-                "#,
+                ",
             )
             .await
             .unwrap();

@@ -12,10 +12,10 @@ futures = "0.3.30"
 hound = "3.5.1"
 log = "0.4.21"
 ogg = { version = "0.9.1", features = ["async"] }
-reqwest = { version = "0.12.4", features = ["multipart"] }
+postgres-types = { version = "0.2.6", features = ["derive"] }
+reqwest = { version = "0.12.4", features = ["json", "multipart"] }
 rubato = "0.15.0"
 rust_decimal = { version = "1.35.0", features = ["db-postgres"] }
-postgres-types = { version = "0.2.6", features = ["derive"] }
 serde = { version = "1.0.200", features = ["derive"] }
 serde_json = "1.0.116"
 symphonia = "0.5.4"
@@ -32,5 +32,5 @@ tokio-postgres = { version = "0.7.10", features = [
     "with-uuid-1",
 ] }
 tokio-tungstenite = "0.21.0"
-url = "2.5.0"
-uuid = { version = "1.8.0", features = ["v4"] }
+url = { version = "2.5.0", features = ["serde"] }
+uuid = { version = "1.8.0", features = ["serde", "v4"] }

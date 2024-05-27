@@ -1,14 +1,14 @@
 use crate::data::Result;
 use deadpool_postgres::GenericClient;
 use rust_decimal::Decimal;
-use time::PrimitiveDateTime;
+use time::OffsetDateTime;
 use tokio_postgres::Row;
 use uuid::Uuid;
 
 /// User data.
 pub struct User {
     pub id: Uuid,
-    pub created_at: PrimitiveDateTime,
+    pub created_at: OffsetDateTime,
     pub balance: Decimal,
     pub allocated_fee: Decimal,
 }

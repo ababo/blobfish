@@ -1,7 +1,9 @@
 mod config;
+mod currency_converter;
 mod data;
 mod infsrv_pool;
 mod ledger;
+mod paypal;
 mod server;
 mod util;
 
