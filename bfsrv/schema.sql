@@ -13,14 +13,20 @@ WHERE
 
 CREATE TABLE token(
   id uuid PRIMARY KEY,
-  hash text NOT NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
-  "user" uuid NOT NULL,
+  expires_at timestamp with time zone NOT NULL,
+  hash text NOT NULL,
+  label text,
+  "user" uuid,
   is_admin boolean NOT NULL,
+  ip_address inet,
+  email text,
   FOREIGN KEY("user") REFERENCES "user"(id)
 );
 
 CREATE INDEX token_user_idx ON token("user");
+
+CREATE INDEX token_ip_address_idx ON token(ip_address);
 
 CREATE TABLE capability(
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -102,10 +108,14 @@ VALUES
   (
     -- Authorization: Bearer QKvO9M1eSniqWjAsQQO9snP2IWWsggdV0l8/jCqgATpOyYUZpuAcOjyt8YJcKjxN
     '40abcef4-cd5e-4a78-aa5a-302c4103bdb2',
-    '$2a$06$7CYjgqKs8AAjJ4aSrDhOvucRa07XM4HbyEzky7l4KbG2e.MNVDxOy',
     '2024-05-22T17:33:00',
+    '2099-01-01T00:00:00',
+    '$2a$06$7CYjgqKs8AAjJ4aSrDhOvucRa07XM4HbyEzky7l4KbG2e.MNVDxOy',
+    'test',
     '61abe888-3947-4dc6-9db7-ede01a1618e2',
-    'true'
+    'true',
+    NULL,
+    NULL
   );
 
 INSERT INTO

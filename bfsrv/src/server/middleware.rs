@@ -5,6 +5,7 @@ use crate::{
 use axum::{async_trait, extract::FromRequestParts, http::request::Parts};
 use base64::prelude::{Engine as _, BASE64_STANDARD};
 use std::sync::Arc;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 /// Authentication middleware.
@@ -28,6 +29,13 @@ impl Auth {
         Some((
             Uuid::from_slice(&data[..UUID_LEN]).unwrap(),
             BASE64_STANDARD.encode(&data[UUID_LEN..]),
+        ))
+    }
+
+    /// Get associated user.
+    pub fn user(&self) -> Result<Uuid> {
+        self.token.user.ok_or(Error::Unauthorized(
+            "token not associated with user".to_owned(),
         ))
     }
 }
@@ -61,6 +69,10 @@ impl FromRequestParts<Arc<Server>> for Auth {
         let Some(token) = Token::authorize(&client, id, &key).await? else {
             return Err(Unauthorized(ACCESS_DENIED.to_owned()));
         };
+
+        if token.expires_at < OffsetDateTime::now_utc() {
+            return Err(Unauthorized("token expired".to_owned()));
+        }
 
         Ok(Self { token })
     }

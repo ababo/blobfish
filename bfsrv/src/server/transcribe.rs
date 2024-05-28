@@ -43,6 +43,7 @@ use tokio::{
     sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
 };
+use uuid::Uuid;
 
 const VORBIS_CONTENT_TYPE: &str = "audio/ogg; codecs=vorbis";
 
@@ -72,6 +73,7 @@ pub async fn handle_transcribe(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Result<impl IntoResponse> {
+    let user = auth.user()?;
     info!("received transcribe request");
 
     if headers.get(CONTENT_TYPE) != Some(&HeaderValue::from_static(VORBIS_CONTENT_TYPE)) {
@@ -107,13 +109,13 @@ pub async fn handle_transcribe(
 
     let (infsrv_sender, infsrv_receiver) = server
         .infsrv_pool
-        .segment(auth.token.user, &query.tariff, terminator.as_deref())
+        .segment(user, &query.tariff, terminator.as_deref())
         .await?;
 
-    Ok(ws.on_upgrade(move |client_ws| async {
+    Ok(ws.on_upgrade(move |client_ws| async move {
         ws_callback(
             server,
-            auth,
+            user,
             query,
             infsrv_sender,
             infsrv_receiver,
@@ -126,7 +128,7 @@ pub async fn handle_transcribe(
 
 async fn ws_callback(
     server: Arc<Server>,
-    auth: Auth,
+    user: Uuid,
     query: TranscribeQuery,
     infsrv_sender: Sender<Vec<u8>>,
     infsrv_receiver: Receiver<InfsrvResult<SegmentItem>>,
@@ -147,7 +149,7 @@ async fn ws_callback(
     let segment_handle = tokio::spawn(async move {
         process_segments(
             cloned_server,
-            auth,
+            user,
             query,
             client_sender,
             infsrv_receiver,
@@ -175,7 +177,7 @@ async fn ws_callback(
 
 async fn process_segments(
     server: Arc<Server>,
-    auth: Auth,
+    user: Uuid,
     query: TranscribeQuery,
     mut client_sender: SplitSink<WebSocket, Message>,
     mut infsrv_receiver: Receiver<InfsrvResult<SegmentItem>>,
@@ -212,7 +214,7 @@ async fn process_segments(
         let result = server
             .infsrv_pool
             .transcribe(
-                auth.token.user,
+                user,
                 query.tariff.as_str(),
                 wav_blob,
                 query.lang.as_ref().cloned(),

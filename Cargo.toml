@@ -7,6 +7,7 @@ axum = { version = "0.7.5", features = ["multipart", "ws"] }
 base64 = "0.22.1"
 clap = { version = "4.5.4", features = ["derive", "env"] }
 deadpool-postgres = { version = "0.13.2" }
+email_address = "0.2.4"
 env_logger = "0.11.3"
 futures = "0.3.30"
 hound = "3.5.1"

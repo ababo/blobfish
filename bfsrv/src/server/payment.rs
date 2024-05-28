@@ -104,8 +104,10 @@ pub async fn handle_payment_post(
     auth: Auth,
     Json(request): Json<PostRequest>,
 ) -> Result<Response> {
+    let user = auth.user()?;
+
     let client = server.pool.get().await?;
-    if let Some(created_at) = Payment::find_latest_created_at(&client, auth.token.user).await? {
+    if let Some(created_at) = Payment::find_latest_created_at(&client, user).await? {
         if created_at > OffsetDateTime::now_utc() - Duration::from_secs(3600) {
             return Err(Error::BadRequest("too frequent payments".to_owned()));
         }
@@ -124,8 +126,8 @@ pub async fn handle_payment_post(
     let mut payment = Payment::new(
         request.currency,
         request.amount,
-        auth.token.user,
-        request.to_user.unwrap_or(auth.token.user),
+        user,
+        request.to_user.unwrap_or(user),
         request.processor,
         reference.clone(),
     );

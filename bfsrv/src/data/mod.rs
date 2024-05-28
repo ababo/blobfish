@@ -9,6 +9,8 @@ use axum::http::StatusCode;
 /// Data error.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("email address: {0}")]
+    EmailAddress(#[from] email_address::Error),
     #[error("postgres: {0}")]
     Postgres(#[from] tokio_postgres::Error),
 }
@@ -18,7 +20,7 @@ impl Error {
     pub fn status(&self) -> StatusCode {
         use Error::*;
         match self {
-            Postgres(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            EmailAddress(_) | Postgres(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 
@@ -26,6 +28,7 @@ impl Error {
     pub fn code(&self) -> &str {
         use Error::*;
         match self {
+            EmailAddress(_) => "email_address",
             Postgres(_) => "postgres",
         }
     }
