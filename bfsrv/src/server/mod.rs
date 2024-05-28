@@ -12,10 +12,11 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, patch, post},
-    Router,
+    Json, Router,
 };
 use deadpool_postgres::Pool;
 use log::{debug, error, info};
+use serde_json::json;
 use std::{future::Future, net::SocketAddr, sync::Arc};
 
 /// Server error.
@@ -31,6 +32,8 @@ pub enum Error {
     Data(#[from] crate::data::Error),
     #[error("deadpool pool: {0}")]
     DeadpoolPool(#[from] deadpool_postgres::PoolError),
+    #[error("handler not found")]
+    HandlerNotFound,
     #[error("infsrv pool: {0}")]
     InfsrvPool(#[from] infsrv_pool::Error),
     #[error("internal: {0}")]
@@ -47,19 +50,49 @@ pub enum Error {
     Unauthorized(String),
 }
 
+impl Error {
+    /// HTTP status code.
+    pub fn status(&self) -> StatusCode {
+        use Error::*;
+        match &self {
+            Axum(_) | DeadpoolPool(_) | Internal(_) | Postgres(_) => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+            BadRequest(_) => StatusCode::BAD_REQUEST,
+            CurrencyConverter(err) => err.status(),
+            Data(err) => err.status(),
+            HandlerNotFound | PaymentNotFound => StatusCode::NOT_FOUND,
+            InfsrvPool(err) => err.status(),
+            Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Paypal(err) => err.status(),
+            Unauthorized(_) => StatusCode::UNAUTHORIZED,
+        }
+    }
+
+    /// Kind code.
+    pub fn code(&self) -> &str {
+        use Error::*;
+        match &self {
+            Axum(_) => "axum",
+            BadRequest(_) => "bad_request",
+            CurrencyConverter(err) => err.code(),
+            Data(err) => err.code(),
+            DeadpoolPool(_) => "deadpool_pool",
+            HandlerNotFound => "handler_not_found",
+            InfsrvPool(err) => err.code(),
+            Internal(_) => "internal",
+            Io(_) => "io",
+            PaymentNotFound => "payment_not_found",
+            Paypal(err) => err.code(),
+            Postgres(_) => "postgres",
+            Unauthorized(_) => "unauthorized",
+        }
+    }
+}
+
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
-        use Error::*;
-        let status = match &self {
-            Axum(_) | CurrencyConverter(_) | Data(_) | DeadpoolPool(_) | Internal(_)
-            | Postgres(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            BadRequest(_) | PaymentNotFound => StatusCode::BAD_REQUEST,
-            InfsrvPool(err) => err.status_code(),
-            Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Paypal(err) => err.status_code(),
-            Unauthorized(_) => StatusCode::UNAUTHORIZED,
-        };
-
+        let status = self.status();
         match status {
             StatusCode::INTERNAL_SERVER_ERROR | StatusCode::TOO_MANY_REQUESTS => {
                 error!("failed to serve HTTP request: {self:#}");
@@ -69,8 +102,13 @@ impl IntoResponse for Error {
             }
         }
 
-        // TODO: Support error codes.
-        (status, self.to_string()).into_response()
+        let response = json!({
+            "error": {
+                "code": self.code(),
+                "message": self.to_string()
+            }
+        });
+        (status, Json(response)).into_response()
     }
 }
 
@@ -111,10 +149,15 @@ impl Server {
     where
         F: Future<Output = ()> + Send + 'static,
     {
+        async fn handle_fallback() -> Result<Response> {
+            Err(Error::HandlerNotFound)
+        }
+
         let app = Router::<Arc<Server>>::new()
             .route("/payment", patch(payment::handle_payment_patch))
             .route("/payment", post(payment::handle_payment_post))
             .route("/transcribe", get(transcribe::handle_transcribe))
+            .fallback(handle_fallback)
             .with_state(self);
 
         info!("started HTTP/WS server");

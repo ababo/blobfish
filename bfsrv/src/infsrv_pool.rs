@@ -50,13 +50,25 @@ pub enum Error {
 
 impl Error {
     /// HTTP status code.
-    pub fn status_code(&self) -> StatusCode {
+    pub fn status(&self) -> StatusCode {
         use Error::*;
         match self {
             Internal | Reqwest(_) | SerdeJson(_) | Tungstanite(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
-            Ledger(err) => err.status_code(),
+            Ledger(err) => err.status(),
+        }
+    }
+
+    /// Kind code.
+    pub fn code(&self) -> &str {
+        use Error::*;
+        match self {
+            Internal => "internal",
+            Ledger(err) => err.code(),
+            Reqwest(_) => "reqwest",
+            SerdeJson(_) => "serde_json",
+            Tungstanite(_) => "tungstanite",
         }
     }
 }

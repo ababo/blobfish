@@ -1,3 +1,4 @@
+use axum::http::StatusCode;
 use log::debug;
 use reqwest::Client;
 use rust_decimal::Decimal;
@@ -10,6 +11,24 @@ use time::OffsetDateTime;
 pub enum Error {
     #[error("reqwest: {0}")]
     Reqwest(#[from] reqwest::Error),
+}
+
+impl Error {
+    /// HTTP status code.
+    pub fn status(&self) -> StatusCode {
+        use Error::*;
+        match self {
+            Reqwest(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+
+    /// Kind code.
+    pub fn code(&self) -> &str {
+        use Error::*;
+        match self {
+            Reqwest(_) => "reqwest",
+        }
+    }
 }
 
 /// CurrencyConverter result.

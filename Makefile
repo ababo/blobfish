@@ -1,5 +1,10 @@
 export PYTHONDONTWRITEBYTECODE=1
 
+.PHONY: build-api-spec
+build-api-spec:
+	npx @redocly/cli build-docs bfsrv/api.oas.json -o target/api.oas.html
+	open target/api.oas.html
+
 .PHONY: lint-infsrv
 lint-infsrv:
 	pylint infsrv

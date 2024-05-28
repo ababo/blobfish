@@ -36,13 +36,29 @@ pub enum Error {
 
 impl Error {
     /// HTTP status code.
-    pub fn status_code(&self) -> StatusCode {
+    pub fn status(&self) -> StatusCode {
         use Error::*;
         match self {
-            Data(_) | DeadpoolPool(_) | Postgres(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            NodeNotFound(_) | UserNotFound(_) => StatusCode::NOT_FOUND,
+            Data(_) | DeadpoolPool(_) | Postgres(_) | NodeNotFound(_) => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+            UserNotFound(_) => StatusCode::NOT_FOUND,
             NotEnoughBalance => StatusCode::PAYMENT_REQUIRED,
             NotEnoughResources => StatusCode::TOO_MANY_REQUESTS,
+        }
+    }
+
+    /// Kind code.
+    pub fn code(&self) -> &str {
+        use Error::*;
+        match self {
+            Data(err) => err.code(),
+            DeadpoolPool(_) => "deadpool_pool",
+            NodeNotFound(_) => "node_not_found",
+            NotEnoughBalance => "not_enough_balance",
+            NotEnoughResources => "not_enough_resources",
+            Postgres(_) => "postgres",
+            UserNotFound(_) => "user_not_found",
         }
     }
 }

@@ -25,11 +25,22 @@ pub enum Error {
 
 impl Error {
     /// HTTP status code.
-    pub fn status_code(&self) -> StatusCode {
+    pub fn status(&self) -> StatusCode {
         use Error::*;
         match self {
             Reqwest(_) | SerdeJson(_) => StatusCode::INTERNAL_SERVER_ERROR,
             UnsupportedCurrency | UnsupportedLocale => StatusCode::BAD_REQUEST,
+        }
+    }
+
+    /// Kind code.
+    pub fn code(&self) -> &str {
+        use Error::*;
+        match self {
+            Reqwest(_) => "reqwest",
+            SerdeJson(_) => "serde_json",
+            UnsupportedCurrency => "unsupported_currency",
+            UnsupportedLocale => "unsupported_locale",
         }
     }
 }
