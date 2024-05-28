@@ -54,36 +54,19 @@ impl IntoResponse for Error {
             Axum(_) | CurrencyConverter(_) | Data(_) | DeadpoolPool(_) | Internal(_)
             | Postgres(_) => StatusCode::INTERNAL_SERVER_ERROR,
             BadRequest(_) | PaymentNotFound => StatusCode::BAD_REQUEST,
-            InfsrvPool(err) => {
-                use infsrv_pool::Error::*;
-                match err {
-                    Internal | Reqwest(_) | SerdeJson(_) | Tungstanite(_) => {
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    }
-                    Ledger(err) => {
-                        if err.is_internal() {
-                            StatusCode::INTERNAL_SERVER_ERROR
-                        } else {
-                            StatusCode::PAYMENT_REQUIRED
-                        }
-                    }
-                }
-            }
+            InfsrvPool(err) => err.status_code(),
             Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Paypal(err) => {
-                if err.is_internal() {
-                    StatusCode::INTERNAL_SERVER_ERROR
-                } else {
-                    StatusCode::BAD_REQUEST
-                }
-            }
+            Paypal(err) => err.status_code(),
             Unauthorized(_) => StatusCode::UNAUTHORIZED,
         };
 
-        if status == StatusCode::INTERNAL_SERVER_ERROR {
-            error!("failed to serve HTTP request: {self:#}");
-        } else {
-            debug!("failed to serve HTTP request: {self:#}");
+        match status {
+            StatusCode::INTERNAL_SERVER_ERROR | StatusCode::TOO_MANY_REQUESTS => {
+                error!("failed to serve HTTP request: {self:#}");
+            }
+            _ => {
+                debug!("failed to serve HTTP request: {self:#}");
+            }
         }
 
         // TODO: Support error codes.

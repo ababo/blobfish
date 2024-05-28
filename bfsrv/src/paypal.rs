@@ -1,3 +1,4 @@
+use axum::http::StatusCode;
 use log::debug;
 use reqwest::Client;
 use rust_decimal::Decimal;
@@ -23,12 +24,12 @@ pub enum Error {
 }
 
 impl Error {
-    /// Whether it's internal error.
-    pub fn is_internal(&self) -> bool {
+    /// HTTP status code.
+    pub fn status_code(&self) -> StatusCode {
         use Error::*;
         match self {
-            Reqwest(_) | SerdeJson(_) => true,
-            UnsupportedCurrency | UnsupportedLocale => false,
+            Reqwest(_) | SerdeJson(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            UnsupportedCurrency | UnsupportedLocale => StatusCode::BAD_REQUEST,
         }
     }
 }

@@ -1,5 +1,5 @@
 use crate::{data::capability::TaskType, ledger::Ledger, util::fmt::TruncateDebug};
-use axum::http::header::CONTENT_TYPE;
+use axum::http::{header::CONTENT_TYPE, StatusCode};
 use futures::{SinkExt, StreamExt};
 use log::{debug, error};
 use reqwest::{
@@ -46,6 +46,19 @@ pub enum Error {
     SerdeJson(#[from] serde_json::Error),
     #[error("tungstanite: {0}")]
     Tungstanite(#[from] tokio_tungstenite::tungstenite::Error),
+}
+
+impl Error {
+    /// HTTP status code.
+    pub fn status_code(&self) -> StatusCode {
+        use Error::*;
+        match self {
+            Internal | Reqwest(_) | SerdeJson(_) | Tungstanite(_) => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+            Ledger(err) => err.status_code(),
+        }
+    }
 }
 
 /// InfsrvPool result.

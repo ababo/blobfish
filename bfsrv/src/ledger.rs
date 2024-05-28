@@ -3,6 +3,7 @@ use crate::data::{
     node::Node,
     user::User,
 };
+use axum::http::StatusCode;
 use deadpool_postgres::{Client, Pool};
 use log::{debug, error};
 use rust_decimal::Decimal;
@@ -34,13 +35,14 @@ pub enum Error {
 }
 
 impl Error {
-    /// Whether it's internal error.
-    pub fn is_internal(&self) -> bool {
+    /// HTTP status code.
+    pub fn status_code(&self) -> StatusCode {
         use Error::*;
         match self {
-            Data(_) | DeadpoolPool(_) | NodeNotFound(_) | Postgres(_) | NotEnoughResources
-            | UserNotFound(_) => true,
-            NotEnoughBalance => false,
+            Data(_) | DeadpoolPool(_) | Postgres(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            NodeNotFound(_) | UserNotFound(_) => StatusCode::NOT_FOUND,
+            NotEnoughBalance => StatusCode::PAYMENT_REQUIRED,
+            NotEnoughResources => StatusCode::TOO_MANY_REQUESTS,
         }
     }
 }
