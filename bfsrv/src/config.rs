@@ -1,4 +1,5 @@
 use clap::Parser;
+use lettre::Address as EmailAddress;
 use std::net::SocketAddr;
 use url::Url;
 
@@ -25,4 +26,12 @@ pub struct Config {
     pub paypal_sandbox: bool,
     #[clap(long, env = "PAYPAL_SECRET_KEY")]
     pub paypal_secret_key: String,
+    #[clap(long, env = "SMTP_FROM")]
+    pub smtp_from: EmailAddress,
+    #[clap(long, env = "SMTP_USERNAME")]
+    pub smtp_username: String,
+    #[clap(long, env = "SMTP_PASSWORD")]
+    pub smtp_password: String,
+    #[clap(long, env = "SMTP_RELAY")]
+    pub smtp_relay: String,
 }

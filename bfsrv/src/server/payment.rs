@@ -30,7 +30,7 @@ pub async fn handle_payment_patch(
     WithRejection(request, _): WithRejection<Json<PatchRequest>, Error>,
 ) -> Result<Response> {
     use Error::*;
-    let mut client = server.pool.get().await?;
+    let mut client = server.pg_pool.get().await?;
     let Some(mut payment) = Payment::get_by_reference(&client, &request.reference).await? else {
         return Err(PaymentNotFound);
     };
@@ -107,10 +107,12 @@ pub async fn handle_payment_post(
 ) -> Result<Response> {
     let user = auth.user()?;
 
-    let client = server.pool.get().await?;
-    if let Some(created_at) = Payment::find_latest_created_at(&client, user).await? {
-        if created_at > OffsetDateTime::now_utc() - Duration::from_secs(3600) {
-            return Err(Error::BadRequest("too frequent payments".to_owned()));
+    let client = server.pg_pool.get().await?;
+    if let Some(payment) = Payment::find_last_with_from_user(&client, user).await? {
+        if payment.created_at > OffsetDateTime::now_utc() - Duration::from_secs(3600) {
+            return Err(Error::BadRequest(
+                "too frequent payment requests".to_owned(),
+            ));
         }
     }
 

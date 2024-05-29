@@ -1,11 +1,12 @@
 mod middleware;
 mod payment;
+mod token;
 mod transcribe;
 
 use crate::{
-    config::Config,
     currency_converter::CurrencyConverter,
     infsrv_pool::{self, InfsrvPool},
+    mailer::Mailer,
     paypal::PaypalProcessor,
     util::fmt::ErrorChainDisplay,
 };
@@ -16,7 +17,7 @@ use axum::{
     routing::{get, patch, post},
     Json, Router,
 };
-use deadpool_postgres::Pool;
+use deadpool_postgres::Pool as PgPool;
 use log::{debug, error, info};
 use serde_json::json;
 use std::{future::Future, net::SocketAddr, sync::Arc};
@@ -78,6 +79,12 @@ pub enum Error {
         #[source]
         std::io::Error,
     ),
+    #[error("mailer")]
+    Mailer(
+        #[from]
+        #[source]
+        crate::mailer::Error,
+    ),
     #[error("payment not found")]
     PaymentNotFound,
     #[error("paypal")]
@@ -110,6 +117,7 @@ impl Error {
             HandlerNotFound | PaymentNotFound => StatusCode::NOT_FOUND,
             InfsrvPool(err) => err.status(),
             Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Mailer(err) => err.status(),
             Paypal(err) => err.status(),
             Unauthorized(_) => StatusCode::UNAUTHORIZED,
         }
@@ -130,6 +138,7 @@ impl Error {
             InfsrvPool(err) => err.code(),
             Internal(_) => "internal",
             Io(_) => "io",
+            Mailer(err) => err.code(),
             PaymentNotFound => "payment_not_found",
             Paypal(err) => err.code(),
             Postgres(_) => "postgres",
@@ -165,30 +174,28 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// HTTP/WS server for Handler.
 pub struct Server {
-    _config: Arc<Config>,
-    pool: Pool,
+    pg_pool: PgPool,
     infsrv_pool: InfsrvPool,
     currency_converter: CurrencyConverter,
     paypal: PaypalProcessor,
+    mailer: Mailer,
 }
 
 impl Server {
     /// Create a new Server instance.
-    pub fn new(config: Arc<Config>, pool: Pool, infsrv_pool: InfsrvPool) -> Self {
-        let currency_converter = CurrencyConverter::new(config.currency.clone());
-        let paypal = PaypalProcessor::new(
-            config.paypal_sandbox,
-            config.paypal_client_id.clone(),
-            config.paypal_secret_key.clone(),
-            config.paypal_return_url.clone(),
-            config.paypal_cancel_url.clone(),
-        );
+    pub fn new(
+        pg_pool: PgPool,
+        infsrv_pool: InfsrvPool,
+        currency_converter: CurrencyConverter,
+        paypal: PaypalProcessor,
+        mailer: Mailer,
+    ) -> Self {
         Self {
-            _config: config,
-            pool,
+            pg_pool,
             infsrv_pool,
             currency_converter,
             paypal,
+            mailer,
         }
     }
 
@@ -204,9 +211,11 @@ impl Server {
         let app = Router::<Arc<Server>>::new()
             .route("/payment", patch(payment::handle_payment_patch))
             .route("/payment", post(payment::handle_payment_post))
+            .route("/token", post(token::handle_token_post))
             .route("/transcribe", get(transcribe::handle_transcribe))
             .fallback(handle_fallback)
-            .with_state(self);
+            .with_state(self)
+            .into_make_service_with_connect_info::<SocketAddr>();
 
         info!("started HTTP/WS server");
 

@@ -3,15 +3,19 @@ mod currency_converter;
 mod data;
 mod infsrv_pool;
 mod ledger;
+mod mailer;
 mod paypal;
 mod server;
 mod util;
 
 use crate::{config::Config, ledger::Ledger};
 use clap::Parser;
+use currency_converter::CurrencyConverter;
 use data::{node::Node, user::User};
 use deadpool_postgres::{Config as DeadpoolClient, ManagerConfig, Pool, RecyclingMethod, Runtime};
 use infsrv_pool::InfsrvPool;
+use mailer::Mailer;
+use paypal::PaypalProcessor;
 use server::Server;
 use std::{future::Future, sync::Arc};
 use tokio_postgres::NoTls;
@@ -46,10 +50,20 @@ async fn main() {
 async fn run(config: Arc<Config>) -> Result<()> {
     env_logger::builder().format_timestamp_millis().init();
 
-    let pool = create_pool(&config).await?;
+    let pg_pool = create_pg_pool(&config).await?;
+    let ledger = Ledger::new(pg_pool.clone());
+    let infsrv_pool = InfsrvPool::new(ledger);
+    let currency_converter = CurrencyConverter::new(config.currency.clone());
+    let paypal = new_paypal(&config);
+    let mailer = Mailer::new(&config);
 
-    let ledger = Ledger::new(pool.clone());
-    let server = Arc::new(Server::new(config.clone(), pool, InfsrvPool::new(ledger)));
+    let server = Arc::new(Server::new(
+        pg_pool,
+        infsrv_pool,
+        currency_converter,
+        paypal,
+        mailer,
+    ));
     let server_handle = tokio::spawn(async move {
         server
             .serve(&config.server_address, shutdown_signal())
@@ -63,7 +77,7 @@ async fn run(config: Arc<Config>) -> Result<()> {
     Ok(())
 }
 
-async fn create_pool(config: &Config) -> Result<Pool> {
+async fn create_pg_pool(config: &Config) -> Result<Pool> {
     let mut deadpool_config = DeadpoolClient::new();
     deadpool_config.url = Some(config.database_url.to_string());
     deadpool_config.manager = Some(ManagerConfig {
@@ -78,6 +92,16 @@ async fn create_pool(config: &Config) -> Result<Pool> {
     User::clear_allocated_fees(&client).await?;
 
     Ok(pool)
+}
+
+fn new_paypal(config: &Config) -> PaypalProcessor {
+    PaypalProcessor::new(
+        config.paypal_sandbox,
+        config.paypal_client_id.clone(),
+        config.paypal_secret_key.clone(),
+        config.paypal_return_url.clone(),
+        config.paypal_cancel_url.clone(),
+    )
 }
 
 fn shutdown_signal() -> impl Future<Output = ()> + Unpin {

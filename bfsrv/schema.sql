@@ -12,14 +12,14 @@ WHERE
   allocated_fee > 0;
 
 CREATE TABLE token(
-  id uuid PRIMARY KEY,
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   expires_at timestamp with time zone NOT NULL,
   hash text NOT NULL,
   label text,
   "user" uuid,
   is_admin boolean NOT NULL,
-  ip_address inet,
+  ip_address inet NOT NULL,
   email text,
   FOREIGN KEY("user") REFERENCES "user"(id)
 );
@@ -110,11 +110,11 @@ VALUES
     '40abcef4-cd5e-4a78-aa5a-302c4103bdb2',
     '2024-05-22T17:33:00',
     '2099-01-01T00:00:00',
-    '$2a$06$7CYjgqKs8AAjJ4aSrDhOvucRa07XM4HbyEzky7l4KbG2e.MNVDxOy',
+    '$2a$06$2WElRfUWMQOcnOmafXKCBOcYzQMrmUklWnhVNAj73ED4mqyErsXXS',
     'test',
     '61abe888-3947-4dc6-9db7-ede01a1618e2',
     'true',
-    NULL,
+    '127.0.0.1',
     NULL
   );
 

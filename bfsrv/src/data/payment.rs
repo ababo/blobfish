@@ -80,7 +80,7 @@ impl Payment {
         row.map(Self::from_row).transpose()
     }
 
-    /// Insert a new Payment row and assign ID.
+    /// Insert a new Payment row and assign ID and created_at.
     pub async fn insert(&mut self, client: &impl GenericClient) -> Result<()> {
         let stmt = client
             .prepare_cached(
@@ -123,15 +123,15 @@ impl Payment {
         Ok(())
     }
 
-    /// Find creation timestamp of latest payment from a given user.
-    pub async fn find_latest_created_at(
+    /// Find last payment with a given from_user.
+    pub async fn find_last_with_from_user(
         client: &impl GenericClient,
         from_user: Uuid,
-    ) -> Result<Option<OffsetDateTime>> {
+    ) -> Result<Option<Self>> {
         let stmt = client
             .prepare_cached(
                 "
-                SELECT created_at
+                SELECT *
                   FROM payment
                  WHERE from_user = $1
                  ORDER BY created_at DESC
@@ -141,15 +141,14 @@ impl Payment {
             .await
             .unwrap();
         let row = client.query_opt(&stmt, &[&from_user]).await?;
-        row.map(|r| r.try_get("created_at").map_err(Into::into))
-            .transpose()
+        row.map(Self::from_row).transpose()
     }
 
     /// Update payment row columns with the current field values.
     pub async fn update(&self, client: &impl GenericClient) -> Result<()> {
         let stmt = client
             .prepare_cached(
-                r#"
+                "
                 UPDATE payment
                    SET created_at = $2,
                        status = $3,
@@ -161,7 +160,7 @@ impl Payment {
                        reference = $9,
                        details = $10
                  WHERE id = $1
-                "#,
+                ",
             )
             .await
             .unwrap();

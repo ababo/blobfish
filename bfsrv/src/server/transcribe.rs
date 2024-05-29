@@ -82,7 +82,7 @@ pub async fn handle_transcribe(
     }
 
     let capabilities = {
-        let client = server.pool.get().await?;
+        let client = server.pg_pool.get().await?;
         Capability::find_with_task_type_and_tariff(&client, TaskType::Transcribe, &query.tariff)
             .await?
     };

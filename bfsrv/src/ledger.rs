@@ -7,7 +7,7 @@ use crate::{
     util::fmt::ErrorChainDisplay,
 };
 use axum::http::StatusCode;
-use deadpool_postgres::{Client, Pool};
+use deadpool_postgres::{Client, Pool as PgPool};
 use log::{debug, error};
 use rust_decimal::Decimal;
 use std::{net::IpAddr, time::Duration};
@@ -83,16 +83,16 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Node usage ledger.
 pub struct Ledger {
-    pool: Pool,
+    pg_pool: PgPool,
     stop_sender: Option<Sender<()>>,
 }
 
 impl Ledger {
     /// Create a new Ledger instance.
-    pub fn new(pool: Pool) -> Self {
+    pub fn new(pg_pool: PgPool) -> Self {
         let (stop_sender, mut stop_receiver) = channel::<()>();
 
-        let pool_cloned = pool.clone();
+        let pool_cloned = pg_pool.clone();
         let mut interval = interval(Duration::from_secs(1));
         tokio::spawn(async move {
             interval.tick().await;
@@ -112,7 +112,7 @@ impl Ledger {
         });
 
         Self {
-            pool,
+            pg_pool,
             stop_sender: Some(stop_sender),
         }
     }
@@ -124,7 +124,7 @@ impl Ledger {
         tariff: &str,
         task_type: TaskType,
     ) -> Result<Allocation> {
-        let mut client = self.pool.get().await?;
+        let mut client = self.pg_pool.get().await?;
 
         let capabilities =
             Capability::find_with_task_type_and_tariff(&client, task_type, tariff).await?;
@@ -169,7 +169,7 @@ impl Ledger {
             id: allocation_id,
             ip_address: node.ip_address,
             capabilities: capability_names,
-            pool: self.pool.clone(),
+            pool: self.pg_pool.clone(),
             user,
             node: node.id,
             compute,
@@ -222,7 +222,7 @@ pub struct Allocation {
     id: Uuid,
     ip_address: IpAddr,
     capabilities: Vec<String>,
-    pool: Pool,
+    pool: PgPool,
     user: Uuid,
     node: Uuid,
     compute: u32,
@@ -253,7 +253,7 @@ impl Allocation {
     }
 
     async fn deallocate(
-        pool: Pool,
+        pool: PgPool,
         user: Uuid,
         node: Uuid,
         compute: u32,
@@ -346,7 +346,7 @@ impl Drop for Ledger {
     }
 }
 
-async fn update_balances(pool: &Pool) -> Result<()> {
+async fn update_balances(pool: &PgPool) -> Result<()> {
     let client = pool.get().await?;
     User::update_balances(&client).await.map_err(Into::into)
 }

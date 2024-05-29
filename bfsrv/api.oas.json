@@ -48,7 +48,7 @@
                   "type": "object",
                   "properties": {
                     "status": {
-                      "description": "Status.",
+                      "description": "Payment status.",
                       "type": "string",
                       "enum": [
                         "new",
@@ -56,7 +56,10 @@
                         "completed"
                       ]
                     }
-                  }
+                  },
+                  "required": [
+                    "status"
+                  ]
                 }
               }
             }
@@ -141,26 +144,30 @@
                   "type": "object",
                   "properties": {
                     "reference": {
-                      "summary": "Payment ID registered at the specified processor",
+                      "description": "Payment ID registered at the specified processor.",
                       "type": "string",
                       "examples": [
                         "5JJ76501HR1068729"
                       ]
                     },
                     "url": {
-                      "summary": "URL to follow for payment completion",
+                      "description": "URL to follow for payment completion.",
                       "type": "string",
                       "examples": [
                         "https://www.paypal.com/checkoutnow?token=5JJ76501HR1068729"
                       ]
                     }
-                  }
+                  },
+                  "required": [
+                    "reference",
+                    "url"
+                  ]
                 }
               }
             }
           },
           "401": {
-            "description": "Error occurred.",
+            "description": "User sent a malformed request.",
             "$ref": "#/components/responses/ErrorResponse"
           },
           "403": {
@@ -169,6 +176,99 @@
           },
           "404": {
             "description": "User not found.",
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "500": {
+            "description": "Server has failed to process request due to internal error.",
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/token": {
+      "post": {
+        "summary": "Create an access token",
+        "description": "There are several kinds of access tokens created by this method:<ul><li>Regular token that enables transcribing.</li><li>Admin token that in addition to transcribing enables managing user account (e.g to issue regular access tokens or change email address).</li><li>Email confirmation token that is used for registering or changing email address.</li></ul>",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expires_at": {
+                    "summary": "Token expiration date and time (ISO-8601)",
+                    "type": "string",
+                    "default": "9999-12-31T00:00:00Z",
+                    "examples": [
+                      "2024-06-02T20:20:56Z"
+                    ]
+                  },
+                  "label": {
+                    "summary": "Token label",
+                    "type": "string",
+                    "examples": [
+                      "Joe's token"
+                    ]
+                  },
+                  "is_admin": {
+                    "summary": "Is the token capable of changing account settings",
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "email": {
+                    "summary": "Email address to change for user or register with",
+                    "type": "string",
+                    "examples": [
+                      "john.smith@gmail.com"
+                    ]
+                  }
+                },
+                "required": []
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Token is created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "Token ID. Omitted if the token is for email address confirmation.",
+                      "type": "string",
+                      "examples": [
+                        "c75e9dfe-e5cb-4e50-910d-2300435cc9c1"
+                      ]
+                    },
+                    "token": {
+                      "description": "Access token. Omitted if the token is for email address confirmation. In that case it's sent to that address.",
+                      "type": "string",
+                      "examples": [
+                        "vtrerCHjSTymLl/0/plEApckP6dP/lISis3Ecid1Lj+tnMUpchSwD438rLeGvvUV"
+                      ]
+                    }
+                  },
+                  "required": []
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "User sent a malformed request.",
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "403": {
+            "description": "User cannot be authorized or authenticated.",
             "$ref": "#/components/responses/ErrorResponse"
           },
           "500": {
@@ -343,21 +443,21 @@
                   "properties": {
                     "begin": {
                       "type": "number",
-                      "summary": "Start time of the segment, in seconds",
+                      "description": "Start time of the segment, in seconds.",
                       "examples": [
                         12.345
                       ]
                     },
                     "end": {
                       "type": "number",
-                      "summary": "End time of the segment, in seconds",
+                      "description": "End time of the segment, in seconds.",
                       "examples": [
                         23.456
                       ]
                     },
                     "text": {
                       "type": "string",
-                      "summary": "Segment transcription",
+                      "description": "Segment transcription.",
                       "examples": [
                         "To be or not to be, that is the question..."
                       ]
@@ -405,17 +505,18 @@
               "properties": {
                 "error": {
                   "type": "object",
+                  "description": "Error details.",
                   "properties": {
                     "code": {
                       "type": "string",
-                      "summary": "Error kind",
+                      "description": "Error kind.",
                       "examples": [
                         "user_not_found"
                       ]
                     },
                     "message": {
                       "type": "string",
-                      "summary": "Error message",
+                      "description": "Error message.",
                       "examples": [
                         "user not found"
                       ]

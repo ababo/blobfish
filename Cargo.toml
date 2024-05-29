@@ -8,10 +8,14 @@ axum-extra = "0.9.3"
 base64 = "0.22.1"
 clap = { version = "4.5.4", features = ["derive", "env"] }
 deadpool-postgres = { version = "0.13.2" }
-email_address = "0.2.4"
 env_logger = "0.11.3"
 futures = "0.3.30"
 hound = "3.5.1"
+lettre = { version = "0.11.7", features = [
+    "serde",
+    "tokio1",
+    "tokio1-native-tls",
+] }
 log = "0.4.21"
 ogg = { version = "0.9.1", features = ["async"] }
 postgres-types = { version = "0.2.6", features = ["derive"] }
@@ -22,7 +26,7 @@ serde = { version = "1.0.200", features = ["derive"] }
 serde_json = "1.0.116"
 symphonia = "0.5.4"
 thiserror = "1.0.59"
-time = "0.3.36"
+time = { version = "0.3.36", features = ["serde-well-known"] }
 tokio = { version = "1.37.0", features = [
     "macros",
     "rt-multi-thread",
