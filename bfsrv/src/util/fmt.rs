@@ -1,4 +1,5 @@
-use std::fmt::{Debug, Formatter, Result, Write};
+use std::error::Error;
+use std::fmt::{Debug, Display, Formatter, Result, Write};
 
 /// Wrapper to truncate output from debug formatting.
 pub struct TruncateDebug<'a, T: Debug> {
@@ -55,6 +56,21 @@ impl<'a, 'b> Write for TruncateWriter<'a, 'b> {
     }
 }
 
+/// Wrapper to write error chain for Display formatting.
+pub struct ErrorChainDisplay<'a, E: Error>(pub &'a E);
+
+impl<'a, E: Error> Display for ErrorChainDisplay<'a, E> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        write!(f, "{}", self.0)?;
+        let mut source = self.0.source();
+        while let Some(cause) = source {
+            write!(f, ": {}", cause)?;
+            source = cause.source();
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,5 +95,36 @@ mod tests {
             format!("{:?}", TruncateDebug::with_max_len(&foo, 20)),
             r#"Text("To be or not t..."#
         );
+    }
+
+    #[test]
+    fn test_error_alt_display() {
+        #[derive(Debug, thiserror::Error)]
+        enum E {
+            #[error("v")]
+            V,
+        }
+
+        #[derive(Debug, thiserror::Error)]
+        enum E2 {
+            V2(#[source] E),
+        }
+
+        impl Display for E2 {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+                write!(f, "v2")
+            }
+        }
+
+        #[derive(Debug, thiserror::Error)]
+        enum E3 {
+            #[error("v3")]
+            V3(#[source] E2),
+        }
+
+        let err = E3::V3(E2::V2(E::V));
+        let alt = ErrorChainDisplay(&err);
+        assert_eq!(format!("{err}"), "v3");
+        assert_eq!(format!("{alt}"), "v3: v2: v");
     }
 }

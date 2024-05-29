@@ -1,4 +1,8 @@
-use crate::{data::capability::TaskType, ledger::Ledger, util::fmt::TruncateDebug};
+use crate::{
+    data::capability::TaskType,
+    ledger::Ledger,
+    util::fmt::{ErrorChainDisplay, TruncateDebug},
+};
 use axum::http::{header::CONTENT_TYPE, StatusCode};
 use futures::{SinkExt, StreamExt};
 use log::{debug, error};
@@ -38,14 +42,30 @@ const WINDOW_DURATION: f32 = 5.0;
 pub enum Error {
     #[error("internal")]
     Internal,
-    #[error("ledger: {0}")]
-    Ledger(#[from] crate::ledger::Error),
-    #[error("reqwest: {0}")]
-    Reqwest(#[from] reqwest::Error),
-    #[error("serde_json: {0}")]
-    SerdeJson(#[from] serde_json::Error),
-    #[error("tungstanite: {0}")]
-    Tungstanite(#[from] tokio_tungstenite::tungstenite::Error),
+    #[error("ledger")]
+    Ledger(
+        #[from]
+        #[source]
+        crate::ledger::Error,
+    ),
+    #[error("reqwest")]
+    Reqwest(
+        #[from]
+        #[source]
+        reqwest::Error,
+    ),
+    #[error("serde_json")]
+    SerdeJson(
+        #[from]
+        #[source]
+        serde_json::Error,
+    ),
+    #[error("tungstanite")]
+    Tungstanite(
+        #[from]
+        #[source]
+        tokio_tungstenite::tungstenite::Error,
+    ),
 }
 
 impl Error {
@@ -151,7 +171,7 @@ impl InfsrvPool {
                             break;
                         };
                         if let Err(err) = ws_sender.send(Message::binary(pcm)).await {
-                            debug!("failed to send pcm to infsrv ws: {err:#}");
+                            debug!("failed to send pcm to infsrv ws: {}", ErrorChainDisplay(&err));
                             break;
                         }
                     },
@@ -162,7 +182,7 @@ impl InfsrvPool {
                                 break;
                             }
                             Err(err) => {
-                                error!("failed to check if allocation closed: {:#}", err);
+                                error!("failed to check if allocation closed: {}", ErrorChainDisplay(&err));
                                 break;
                             }
                             _ => {},
@@ -202,7 +222,10 @@ impl InfsrvPool {
                         continue;
                     }
                     Err(err) => {
-                        debug!("failed to receive from infsrv ws: {err:#}");
+                        debug!(
+                            "failed to receive from infsrv ws: {}",
+                            ErrorChainDisplay(&err)
+                        );
                         let _ = sender.send(Err(Tungstanite(err))).await;
                         break;
                     }

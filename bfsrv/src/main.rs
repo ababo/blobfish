@@ -15,13 +15,22 @@ use infsrv_pool::InfsrvPool;
 use server::Server;
 use std::{future::Future, sync::Arc};
 use tokio_postgres::NoTls;
+use util::fmt::ErrorChainDisplay;
 
 #[derive(Debug, thiserror::Error)]
 enum Error {
-    #[error("data: {0}")]
-    Data(#[from] crate::data::Error),
-    #[error("deadpool pool: {0}")]
-    DeadpoolPool(#[from] deadpool_postgres::PoolError),
+    #[error("data")]
+    Data(
+        #[from]
+        #[source]
+        crate::data::Error,
+    ),
+    #[error("deadpool pool")]
+    DeadpoolPool(
+        #[from]
+        #[source]
+        deadpool_postgres::PoolError,
+    ),
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -30,7 +39,7 @@ type Result<T> = std::result::Result<T, Error>;
 async fn main() {
     let config = Arc::new(Config::parse());
     if let Err(err) = run(config).await {
-        eprintln!("exited with error: {err:#}");
+        eprintln!("exited with error: {}", ErrorChainDisplay(&err));
     }
 }
 

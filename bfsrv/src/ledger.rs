@@ -1,7 +1,10 @@
-use crate::data::{
-    capability::{Capability, TaskType},
-    node::Node,
-    user::User,
+use crate::{
+    data::{
+        capability::{Capability, TaskType},
+        node::Node,
+        user::User,
+    },
+    util::fmt::ErrorChainDisplay,
 };
 use axum::http::StatusCode;
 use deadpool_postgres::{Client, Pool};
@@ -18,16 +21,28 @@ use uuid::Uuid;
 /// Ledger error.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("data: {0}")]
-    Data(#[from] crate::data::Error),
-    #[error("deadpool pool: {0}")]
-    DeadpoolPool(#[from] deadpool_postgres::PoolError),
+    #[error("data")]
+    Data(
+        #[from]
+        #[source]
+        crate::data::Error,
+    ),
+    #[error("deadpool pool")]
+    DeadpoolPool(
+        #[from]
+        #[source]
+        deadpool_postgres::PoolError,
+    ),
     #[error("node {0} not found")]
     NodeNotFound(Uuid),
     #[error("not enough balance")]
     NotEnoughBalance,
-    #[error("postgres: {0}")]
-    Postgres(#[from] tokio_postgres::Error),
+    #[error("postgres")]
+    Postgres(
+        #[from]
+        #[source]
+        tokio_postgres::Error,
+    ),
     #[error("not enough resources")]
     NotEnoughResources,
     #[error("user {0} not found")]
@@ -85,7 +100,7 @@ impl Ledger {
                 tokio::select! {
                     _ = interval.tick() => {
                         if let Err(err) = update_balances(&pool_cloned).await {
-                            error!("failed to update user balances: {err:#}");
+                            error!("failed to update user balances: {}", ErrorChainDisplay(&err));
                         }
                     },
                     _ = &mut stop_receiver => {
@@ -316,7 +331,7 @@ impl Drop for Allocation {
 
         tokio::spawn(async move {
             if let Err(err) = Self::deallocate(pool, user, node, compute, memory, fee).await {
-                error!("failed to deallocate {id}: {err:#}");
+                error!("failed to deallocate {id}: {}", ErrorChainDisplay(&err));
             } else {
                 debug!("deallocated {id}");
             }

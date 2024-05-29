@@ -7,6 +7,7 @@ use crate::{
     currency_converter::CurrencyConverter,
     infsrv_pool::{self, InfsrvPool},
     paypal::PaypalProcessor,
+    util::fmt::ErrorChainDisplay,
 };
 use axum::{
     extract::rejection,
@@ -23,35 +24,75 @@ use std::{future::Future, net::SocketAddr, sync::Arc};
 /// Server error.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("axum: {0}")]
-    Axum(#[from] axum::Error),
-    #[error("axum json rejection: {0}")]
-    AxumJsonRejection(#[from] rejection::JsonRejection),
-    #[error("axum query rejection: {0}")]
-    AxumQueryRejection(#[from] rejection::QueryRejection),
-    #[error("bad request: {0}")]
+    #[error("axum")]
+    Axum(
+        #[from]
+        #[source]
+        axum::Error,
+    ),
+    #[error("axum json rejection")]
+    AxumJsonRejection(
+        #[from]
+        #[source]
+        rejection::JsonRejection,
+    ),
+    #[error("axum query rejection")]
+    AxumQueryRejection(
+        #[from]
+        #[source]
+        rejection::QueryRejection,
+    ),
+    #[error("bad request ({0})")]
     BadRequest(String),
-    #[error("currency converter: {0}")]
-    CurrencyConverter(#[from] crate::currency_converter::Error),
-    #[error("data: {0}")]
-    Data(#[from] crate::data::Error),
-    #[error("deadpool pool: {0}")]
-    DeadpoolPool(#[from] deadpool_postgres::PoolError),
+    #[error("currency converter")]
+    CurrencyConverter(
+        #[from]
+        #[source]
+        crate::currency_converter::Error,
+    ),
+    #[error("data")]
+    Data(
+        #[from]
+        #[source]
+        crate::data::Error,
+    ),
+    #[error("deadpool pool")]
+    DeadpoolPool(
+        #[from]
+        #[source]
+        deadpool_postgres::PoolError,
+    ),
     #[error("handler not found")]
     HandlerNotFound,
-    #[error("infsrv pool: {0}")]
-    InfsrvPool(#[from] infsrv_pool::Error),
-    #[error("internal: {0}")]
+    #[error("infsrv pool")]
+    InfsrvPool(
+        #[from]
+        #[source]
+        infsrv_pool::Error,
+    ),
+    #[error("internal ({0})")]
     Internal(String),
-    #[error("io: {0}")]
-    Io(#[from] std::io::Error),
+    #[error("io")]
+    Io(
+        #[from]
+        #[source]
+        std::io::Error,
+    ),
     #[error("payment not found")]
     PaymentNotFound,
-    #[error("paypal: {0}")]
-    Paypal(#[from] crate::paypal::Error),
-    #[error("postgres: {0}")]
-    Postgres(#[from] tokio_postgres::Error),
-    #[error("unauthorized: {0}")]
+    #[error("paypal")]
+    Paypal(
+        #[from]
+        #[source]
+        crate::paypal::Error,
+    ),
+    #[error("postgres")]
+    Postgres(
+        #[from]
+        #[source]
+        tokio_postgres::Error,
+    ),
+    #[error("unauthorized ({0})")]
     Unauthorized(String),
 }
 
@@ -102,10 +143,10 @@ impl IntoResponse for Error {
         let status = self.status();
         match status {
             StatusCode::INTERNAL_SERVER_ERROR | StatusCode::TOO_MANY_REQUESTS => {
-                error!("failed to serve HTTP request: {self:#}");
+                error!("failed to serve HTTP request: {}", ErrorChainDisplay(&self));
             }
             _ => {
-                debug!("failed to serve HTTP request: {self:#}");
+                debug!("failed to serve HTTP request: {}", ErrorChainDisplay(&self));
             }
         }
 

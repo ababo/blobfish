@@ -9,10 +9,18 @@ use axum::http::StatusCode;
 /// Data error.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("email address: {0}")]
-    EmailAddress(#[from] email_address::Error),
-    #[error("postgres: {0}")]
-    Postgres(#[from] tokio_postgres::Error),
+    #[error("email address")]
+    EmailAddress(
+        #[from]
+        #[source]
+        email_address::Error,
+    ),
+    #[error("postgres")]
+    Postgres(
+        #[from]
+        #[source]
+        tokio_postgres::Error,
+    ),
 }
 
 impl Error {

@@ -4,7 +4,7 @@ use crate::{
         Result as InfsrvResult, SegmentItem, MAX_SEGMENT_DURATION, SAMPLE_RATE, TERMINATOR_HEADER,
     },
     server::{middleware::Auth, Error, Result, Server},
-    util::fmt::TruncateDebug,
+    util::fmt::{ErrorChainDisplay, TruncateDebug},
 };
 use axum::{
     extract::{
@@ -226,7 +226,7 @@ async fn process_segments(
         let transcribe_item = match result {
             Ok(item) => item,
             Err(err) => {
-                error!("failed to transcribe segment: {err:#}");
+                error!("failed to transcribe segment: {}", ErrorChainDisplay(&err));
                 break;
             }
         };
@@ -238,7 +238,7 @@ async fn process_segments(
         });
         let json = serde_json::to_string(&item).unwrap();
         if let Err(err) = client_sender.send(Message::Text(json + "\n")).await {
-            debug!("failed to send to client ws: {err:#}");
+            debug!("failed to send to client ws: {}", ErrorChainDisplay(&err));
             break;
         }
     }
@@ -288,7 +288,7 @@ impl AudioStreamProcessor {
                     match result {
                         Some(Ok(packet)) => packet,
                         Some(Err(err)) => {
-                            debug!("failed to read ogg packet: {err:#}");
+                            debug!("failed to read ogg packet: {err}");
                             break;
                         }
                         None => {
@@ -315,7 +315,10 @@ impl AudioStreamProcessor {
                     decoder = match VorbisDecoder::try_new(&codec_params, &decoder_opts) {
                         Ok(decoder) => Some(decoder),
                         Err(err) => {
-                            debug!("failed to create vorbis decoder: {err:#}");
+                            debug!(
+                                "failed to create vorbis decoder: {}",
+                                ErrorChainDisplay(&err)
+                            );
                             return;
                         }
                     };
@@ -330,7 +333,7 @@ impl AudioStreamProcessor {
                     let buf = match decoder.as_mut().unwrap().decode(&packet) {
                         Ok(buf) => buf,
                         Err(err) => {
-                            debug!("failed to decode packet: {err:#}");
+                            debug!("failed to decode packet: {}", ErrorChainDisplay(&err));
                             return;
                         }
                     };
@@ -418,7 +421,7 @@ impl AudioStreamProcessor {
                         debug!("ignoring client ws msg {:?}", TruncateDebug::new(&msg));
                     }
                     Err(err) => {
-                        debug!("failed to read client ws: {err:#}");
+                        debug!("failed to read client ws: {}", ErrorChainDisplay(&err));
                         let io_err = IoError::new(IoErrorKind::Other, err);
                         if sender.send(Err(io_err)).await.is_err() {
                             debug!("failed to send error to packet reader");
@@ -474,7 +477,10 @@ impl AudioStreamProcessor {
                 }
             }
             if let Err(err) = infsrv_sender.send(pcm).await {
-                debug!("failed to send pcm to infsrv ws: {err:#}");
+                debug!(
+                    "failed to send pcm to infsrv ws: {}",
+                    ErrorChainDisplay(&err)
+                );
                 return false;
             }
             offset += chunk_len;
@@ -482,7 +488,10 @@ impl AudioStreamProcessor {
 
         if let Some(delim) = terminator {
             if let Err(err) = infsrv_sender.send(delim.to_owned()).await {
-                debug!("failed to send terminator to infsrv ws: {err:#}");
+                debug!(
+                    "failed to send terminator to infsrv ws: {}",
+                    ErrorChainDisplay(&err)
+                );
                 return false;
             }
         }

@@ -13,10 +13,18 @@ use crate::data::payment::PaymentStatus;
 /// Server error.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("reqwest: {0}")]
-    Reqwest(#[from] reqwest::Error),
-    #[error("serde_json: {0}")]
-    SerdeJson(#[from] serde_json::Error),
+    #[error("reqwest")]
+    Reqwest(
+        #[from]
+        #[source]
+        reqwest::Error,
+    ),
+    #[error("serde_json")]
+    SerdeJson(
+        #[from]
+        #[source]
+        serde_json::Error,
+    ),
     #[error("unsupported currency")]
     UnsupportedCurrency,
     #[error("unsupported locale")]

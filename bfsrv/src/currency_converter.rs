@@ -9,8 +9,12 @@ use time::OffsetDateTime;
 /// CurrencyConverter error.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("reqwest: {0}")]
-    Reqwest(#[from] reqwest::Error),
+    #[error("reqwest")]
+    Reqwest(
+        #[from]
+        #[source]
+        reqwest::Error,
+    ),
 }
 
 impl Error {
