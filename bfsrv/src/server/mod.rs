@@ -9,6 +9,7 @@ use crate::{
     paypal::PaypalProcessor,
 };
 use axum::{
+    extract::rejection,
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, patch, post},
@@ -24,6 +25,10 @@ use std::{future::Future, net::SocketAddr, sync::Arc};
 pub enum Error {
     #[error("axum: {0}")]
     Axum(#[from] axum::Error),
+    #[error("axum json rejection: {0}")]
+    AxumJsonRejection(#[from] rejection::JsonRejection),
+    #[error("axum query rejection: {0}")]
+    AxumQueryRejection(#[from] rejection::QueryRejection),
     #[error("bad request: {0}")]
     BadRequest(String),
     #[error("currency converter: {0}")]
@@ -58,7 +63,7 @@ impl Error {
             Axum(_) | DeadpoolPool(_) | Internal(_) | Postgres(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
-            BadRequest(_) => StatusCode::BAD_REQUEST,
+            AxumJsonRejection(_) | AxumQueryRejection(_) | BadRequest(_) => StatusCode::BAD_REQUEST,
             CurrencyConverter(err) => err.status(),
             Data(err) => err.status(),
             HandlerNotFound | PaymentNotFound => StatusCode::NOT_FOUND,
@@ -74,6 +79,8 @@ impl Error {
         use Error::*;
         match &self {
             Axum(_) => "axum",
+            AxumJsonRejection(_) => "axum_json_rejection",
+            AxumQueryRejection(_) => "axum_query_rejection",
             BadRequest(_) => "bad_request",
             CurrencyConverter(err) => err.code(),
             Data(err) => err.code(),

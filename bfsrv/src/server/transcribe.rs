@@ -14,6 +14,7 @@ use axum::{
     http::{header::CONTENT_TYPE, HeaderMap, HeaderValue},
     response::IntoResponse,
 };
+use axum_extra::extract::WithRejection;
 use futures::{
     channel::mpsc::channel,
     stream::{SplitSink, SplitStream},
@@ -69,7 +70,7 @@ pub struct TranscribeItem {
 pub async fn handle_transcribe(
     State(server): State<Arc<Server>>,
     auth: Auth,
-    Query(query): Query<TranscribeQuery>,
+    WithRejection(Query(query), _): WithRejection<Query<TranscribeQuery>, Error>,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Result<impl IntoResponse> {

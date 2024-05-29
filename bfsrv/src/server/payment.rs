@@ -9,6 +9,7 @@ use axum::{
     extract::{Json, State},
     response::{IntoResponse, Response},
 };
+use axum_extra::extract::WithRejection;
 use log::info;
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -26,7 +27,7 @@ pub struct PatchRequest {
 /// Handle payment PATCH requests.
 pub async fn handle_payment_patch(
     State(server): State<Arc<Server>>,
-    Json(request): Json<PatchRequest>,
+    WithRejection(request, _): WithRejection<Json<PatchRequest>, Error>,
 ) -> Result<Response> {
     use Error::*;
     let mut client = server.pool.get().await?;
@@ -102,7 +103,7 @@ pub struct PostRequest {
 pub async fn handle_payment_post(
     State(server): State<Arc<Server>>,
     auth: Auth,
-    Json(request): Json<PostRequest>,
+    WithRejection(Json(request), _): WithRejection<Json<PostRequest>, Error>,
 ) -> Result<Response> {
     let user = auth.user()?;
 

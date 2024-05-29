@@ -4,6 +4,7 @@ resolver = "2"
 
 [workspace.dependencies]
 axum = { version = "0.7.5", features = ["multipart", "ws"] }
+axum-extra = "0.9.3"
 base64 = "0.22.1"
 clap = { version = "4.5.4", features = ["derive", "env"] }
 deadpool-postgres = { version = "0.13.2" }
