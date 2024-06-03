@@ -1,10 +1,21 @@
 CREATE EXTENSION pgcrypto;
 
+CREATE TABLE campaign(
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  hash text NOT NULL,
+  initial_balance decimal NOT NULL
+);
+
 CREATE TABLE "user"(
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   created_at timestamp with time zone NOT NULL DEFAULT now(),
-  balance decimal NOT NULL DEFAULT 0,
-  allocated_fee decimal NOT NULL DEFAULT 0
+  email text NOT NULL UNIQUE,
+  referrer uuid,
+  campaign uuid NOT NULL,
+  balance decimal NOT NULL,
+  allocated_fee decimal NOT NULL DEFAULT 0,
+  FOREIGN KEY(referrer) REFERENCES "user"(id),
+  FOREIGN KEY(campaign) REFERENCES campaign(id)
 );
 
 CREATE INDEX user_allocated_fee_idx ON "user"(allocated_fee)
@@ -93,11 +104,24 @@ CREATE INDEX payment_from_user_idx ON payment(from_user);
 CREATE INDEX payment_reference_idx ON payment(reference);
 
 INSERT INTO
+  campaign
+VALUES
+  (
+    '05a1e610-3483-4142-bc98-3954c9eae00e',
+    -- The promo_code is "default".
+    '$2a$06$R3fyFDOjlw6KEvldakN5z.fPYtqfdVuVFK8vJ12p7syNBByG6/Gou',
+    1.0
+  );
+
+INSERT INTO
   "user"
 VALUES
   (
     '61abe888-3947-4dc6-9db7-ede01a1618e2',
-    '2024-05-22T17:33:00',
+    '2024-05-22T17:33:00Z',
+    'test@test.com',
+    NULL,
+    '05a1e610-3483-4142-bc98-3954c9eae00e',
     10,
     0
   );
@@ -108,8 +132,8 @@ VALUES
   (
     -- Authorization: Bearer QKvO9M1eSniqWjAsQQO9snP2IWWsggdV0l8/jCqgATpOyYUZpuAcOjyt8YJcKjxN
     '40abcef4-cd5e-4a78-aa5a-302c4103bdb2',
-    '2024-05-22T17:33:00',
-    '2099-01-01T00:00:00',
+    '2024-05-22T17:33:00Z',
+    '9999-12-31T01:00:00Z',
     '$2a$06$2WElRfUWMQOcnOmafXKCBOcYzQMrmUklWnhVNAj73ED4mqyErsXXS',
     'test',
     '61abe888-3947-4dc6-9db7-ede01a1618e2',

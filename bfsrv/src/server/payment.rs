@@ -19,19 +19,20 @@ use time::OffsetDateTime;
 use tokio_postgres::IsolationLevel;
 use uuid::Uuid;
 
+/// Body payload for PATCH-request.
 #[derive(Deserialize)]
-pub struct PatchRequest {
+pub struct PatchRequestPayload {
     reference: String,
 }
 
 /// Handle payment PATCH requests.
 pub async fn handle_payment_patch(
     State(server): State<Arc<Server>>,
-    WithRejection(request, _): WithRejection<Json<PatchRequest>, Error>,
+    WithRejection(payload, _): WithRejection<Json<PatchRequestPayload>, Error>,
 ) -> Result<Response> {
     use Error::*;
     let mut client = server.pg_pool.get().await?;
-    let Some(mut payment) = Payment::get_by_reference(&client, &request.reference).await? else {
+    let Some(mut payment) = Payment::get_by_reference(&client, &payload.reference).await? else {
         return Err(PaymentNotFound);
     };
 
@@ -68,7 +69,7 @@ pub async fn handle_payment_patch(
         .start()
         .await?;
 
-    let mut payment = Payment::get_by_reference(&tx, &request.reference)
+    let mut payment = Payment::get_by_reference(&tx, &payload.reference)
         .await?
         .unwrap();
     payment.status = status;
@@ -90,8 +91,10 @@ pub async fn handle_payment_patch(
     Ok(Json(json!({ "status": payment.status })).into_response())
 }
 
+/// Body payload for POST-request.
 #[derive(Deserialize)]
-pub struct PostRequest {
+#[serde(rename_all = "camelCase")]
+pub struct PostRequestPayload {
     currency: String,
     amount: Decimal,
     processor: PaymentProcessor,
@@ -103,7 +106,7 @@ pub struct PostRequest {
 pub async fn handle_payment_post(
     State(server): State<Arc<Server>>,
     auth: Auth,
-    WithRejection(Json(request), _): WithRejection<Json<PostRequest>, Error>,
+    WithRejection(Json(payload), _): WithRejection<Json<PostRequestPayload>, Error>,
 ) -> Result<Response> {
     let user = auth.user()?;
 
@@ -117,21 +120,21 @@ pub async fn handle_payment_post(
     }
 
     use PaymentProcessor::*;
-    let (reference, url) = match request.processor {
+    let (reference, url) = match payload.processor {
         Paypal => {
             server
                 .paypal
-                .initiate(&request.currency, request.amount, request.locale.as_deref())
+                .initiate(&payload.currency, payload.amount, payload.locale.as_deref())
                 .await?
         }
     };
 
     let mut payment = Payment::new(
-        request.currency,
-        request.amount,
+        payload.currency,
+        payload.amount,
         user,
-        request.to_user.unwrap_or(user),
-        request.processor,
+        payload.to_user.unwrap_or(user),
+        payload.processor,
         reference.clone(),
     );
     payment.insert(&client).await?;

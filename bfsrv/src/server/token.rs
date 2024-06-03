@@ -15,8 +15,10 @@ use serde_json::{json, Map};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use time::{Date, OffsetDateTime, Time};
 
+/// Body payload for PATCH-request.
 #[derive(Deserialize)]
-pub struct PostRequest {
+#[serde(rename_all = "camelCase")]
+pub struct PostRequestPayload {
     expires_at: Option<OffsetDateTime>,
     label: Option<String>,
     is_admin: Option<bool>,
@@ -28,7 +30,7 @@ pub async fn handle_token_post(
     State(server): State<Arc<Server>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
-    WithRejection(Json(request), _): WithRejection<Json<PostRequest>, Error>,
+    WithRejection(Json(payload), _): WithRejection<Json<PostRequestPayload>, Error>,
 ) -> Result<Response> {
     let mut client = server.pg_pool.get().await?;
     if let Some(token) = Token::find_last_with_ip_address(&client, addr.ip()).await? {
@@ -39,21 +41,20 @@ pub async fn handle_token_post(
 
     let user = match Auth::create(&server.pg_pool, &headers).await {
         Ok(auth) => auth.token.user,
-        Err(Error::Unauthorized(_)) if request.email.is_some() => None,
+        Err(Error::Unauthorized(_)) if payload.email.is_some() => None,
         Err(err) => return Err(err),
     };
 
-    let expires_at = request
-        .expires_at
-        .unwrap_or(OffsetDateTime::new_utc(Date::MAX, Time::MIDNIGHT));
+    let never = OffsetDateTime::new_utc(Date::MAX, Time::MIDNIGHT);
+    let expires_at = payload.expires_at.unwrap_or(never);
 
     let mut token = Token::new(
         expires_at,
-        request.label,
+        payload.label,
         user,
-        request.is_admin.unwrap_or_default(),
+        payload.is_admin.unwrap_or_default(),
         addr.ip(),
-        request.email,
+        payload.email,
     );
 
     let tx = client.build_transaction().start().await?;

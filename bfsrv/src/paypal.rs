@@ -57,13 +57,13 @@ impl Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Deserialize)]
-struct TokenResponse {
+struct TokenResponsePayload {
     access_token: String,
     expires_in: u64,
 }
 
 #[derive(Deserialize)]
-struct OrderResponse {
+struct OrderResponsePayload {
     id: String,
     status: String,
 }
@@ -171,7 +171,7 @@ impl PaypalProcessor {
             .await?
             .error_for_status()?;
 
-        let response: OrderResponse = response.json().await?;
+        let payload: OrderResponsePayload = response.json().await?;
 
         let mut url = Url::parse(if self.sandbox {
             "https://www.sandbox.paypal.com/checkoutnow"
@@ -179,9 +179,9 @@ impl PaypalProcessor {
             "https://www.paypal.com/checkoutnow"
         })
         .unwrap();
-        url.query_pairs_mut().append_pair("token", &response.id);
+        url.query_pairs_mut().append_pair("token", &payload.id);
 
-        Ok((response.id, url))
+        Ok((payload.id, url))
     }
 
     /// Retrieve a payment status and details by a given reference.
@@ -203,10 +203,10 @@ impl PaypalProcessor {
             .error_for_status()?;
 
         let json = response.text().await?;
-        let response: OrderResponse = serde_json::from_str(&json)?;
+        let payload: OrderResponsePayload = serde_json::from_str(&json)?;
 
         use PaymentStatus::*;
-        let status = match response.status.as_str() {
+        let status = match payload.status.as_str() {
             "REVERSED" => Canceled,
             "COMPLETED" => Completed,
             _ => New,
@@ -235,12 +235,12 @@ impl PaypalProcessor {
             .await?
             .error_for_status()?;
 
-        let response: TokenResponse = response.json().await?;
+        let payload: TokenResponsePayload = response.json().await?;
 
         let mut state = self.state.write().unwrap();
-        state.token = response.access_token;
+        state.token = payload.access_token;
         state.token_expires_at =
-            OffsetDateTime::now_utc() + Duration::from_secs(response.expires_in);
+            OffsetDateTime::now_utc() + Duration::from_secs(payload.expires_in);
 
         debug!(
             "retrieved paypal token (expires at {})",

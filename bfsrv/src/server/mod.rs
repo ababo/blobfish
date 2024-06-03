@@ -2,6 +2,7 @@ mod middleware;
 mod payment;
 mod token;
 mod transcribe;
+mod user;
 
 use crate::{
     currency_converter::CurrencyConverter,
@@ -25,19 +26,19 @@ use std::{future::Future, net::SocketAddr, sync::Arc};
 /// Server error.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("axum")]
+    #[error("web server error")]
     Axum(
         #[from]
         #[source]
         axum::Error,
     ),
-    #[error("axum json rejection")]
+    #[error("malformed JSON payload")]
     AxumJsonRejection(
         #[from]
         #[source]
         rejection::JsonRejection,
     ),
-    #[error("axum query rejection")]
+    #[error("malformed URL query")]
     AxumQueryRejection(
         #[from]
         #[source]
@@ -45,33 +46,37 @@ pub enum Error {
     ),
     #[error("bad request ({0})")]
     BadRequest(String),
-    #[error("currency converter")]
+    #[error("promotion campaign not found")]
+    CampaignNotFound,
+    #[error("failed to convert currency")]
     CurrencyConverter(
         #[from]
         #[source]
         crate::currency_converter::Error,
     ),
-    #[error("data")]
+    #[error("database error")]
     Data(
         #[from]
         #[source]
         crate::data::Error,
     ),
-    #[error("deadpool pool")]
+    #[error("database connection error")]
     DeadpoolPool(
         #[from]
         #[source]
         deadpool_postgres::PoolError,
     ),
-    #[error("handler not found")]
+    #[error("user with email already registered")]
+    EmailAlreadyRegistered,
+    #[error("endpoint not found")]
     HandlerNotFound,
-    #[error("infsrv pool")]
+    #[error("worker node error")]
     InfsrvPool(
         #[from]
         #[source]
         infsrv_pool::Error,
     ),
-    #[error("internal ({0})")]
+    #[error("internal error ({0})")]
     Internal(String),
     #[error("io")]
     Io(
@@ -79,7 +84,7 @@ pub enum Error {
         #[source]
         std::io::Error,
     ),
-    #[error("mailer")]
+    #[error("mailing error")]
     Mailer(
         #[from]
         #[source]
@@ -93,13 +98,13 @@ pub enum Error {
         #[source]
         crate::paypal::Error,
     ),
-    #[error("postgres")]
+    #[error("database query error")]
     Postgres(
         #[from]
         #[source]
         tokio_postgres::Error,
     ),
-    #[error("unauthorized ({0})")]
+    #[error("unauthorized access ({0})")]
     Unauthorized(String),
 }
 
@@ -111,7 +116,11 @@ impl Error {
             Axum(_) | DeadpoolPool(_) | Internal(_) | Postgres(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
-            AxumJsonRejection(_) | AxumQueryRejection(_) | BadRequest(_) => StatusCode::BAD_REQUEST,
+            AxumJsonRejection(_)
+            | AxumQueryRejection(_)
+            | BadRequest(_)
+            | CampaignNotFound
+            | EmailAlreadyRegistered => StatusCode::BAD_REQUEST,
             CurrencyConverter(err) => err.status(),
             Data(err) => err.status(),
             HandlerNotFound | PaymentNotFound => StatusCode::NOT_FOUND,
@@ -131,9 +140,11 @@ impl Error {
             AxumJsonRejection(_) => "axum_json_rejection",
             AxumQueryRejection(_) => "axum_query_rejection",
             BadRequest(_) => "bad_request",
+            CampaignNotFound => "campaign_not_found",
             CurrencyConverter(err) => err.code(),
             Data(err) => err.code(),
             DeadpoolPool(_) => "deadpool_pool",
+            EmailAlreadyRegistered => "email_already_registered",
             HandlerNotFound => "handler_not_found",
             InfsrvPool(err) => err.code(),
             Internal(_) => "internal",
@@ -213,6 +224,7 @@ impl Server {
             .route("/payment", post(payment::handle_payment_post))
             .route("/token", post(token::handle_token_post))
             .route("/transcribe", get(transcribe::handle_transcribe))
+            .route("/user", post(user::handle_user_post))
             .fallback(handle_fallback)
             .with_state(self)
             .into_make_service_with_connect_info::<SocketAddr>();

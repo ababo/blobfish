@@ -1,3 +1,4 @@
+pub mod campaign;
 pub mod capability;
 pub mod node;
 pub mod payment;

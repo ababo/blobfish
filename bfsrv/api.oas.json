@@ -28,7 +28,7 @@
                 "type": "object",
                 "properties": {
                   "reference": {
-                    "summary": "Payment reference returned by /payment POST",
+                    "description": "Payment reference returned by /payment POST.",
                     "type": "string",
                     "examples": [
                       "5JJ76501HR1068729"
@@ -94,35 +94,35 @@
                 "type": "object",
                 "properties": {
                   "currency": {
-                    "summary": "Payment currency",
+                    "description": "Payment currency.",
                     "type": "string",
                     "examples": [
                       "USD"
                     ]
                   },
                   "amount": {
-                    "summary": "Payment amount",
+                    "description": "Payment amount.",
                     "type": "number",
                     "examples": [
                       12.34
                     ]
                   },
                   "processor": {
-                    "summary": "Payment processor (currently only Paypal is supported)",
+                    "description": "Payment processor (currently only Paypal is supported).",
                     "type": "string",
                     "enum": [
                       "paypal"
                     ]
                   },
-                  "to_user": {
-                    "summary": "Receiving user UUID (the calling user if omitted)",
+                  "toUser": {
+                    "description": "Receiving user UUID (the calling user if omitted).",
                     "type": "string",
                     "examples": [
                       "40d3699b-85b9-45fd-8d93-26f3832e7717"
                     ]
                   },
                   "locale": {
-                    "summary": "Payment page locale",
+                    "description": "Payment page locale.",
                     "default": "en-US"
                   }
                 },
@@ -202,8 +202,8 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "expires_at": {
-                    "summary": "Token expiration date and time (ISO-8601)",
+                  "expiresAt": {
+                    "description": "Token expiration date and time (ISO-8601).",
                     "type": "string",
                     "default": "9999-12-31T00:00:00Z",
                     "examples": [
@@ -211,19 +211,19 @@
                     ]
                   },
                   "label": {
-                    "summary": "Token label",
+                    "description": "Token label.",
                     "type": "string",
                     "examples": [
                       "Joe's token"
                     ]
                   },
-                  "is_admin": {
-                    "summary": "Is the token capable of changing account settings",
+                  "isAdmin": {
+                    "description": "Is the token capable of changing account settings.",
                     "type": "boolean",
                     "default": false
                   },
                   "email": {
-                    "summary": "Email address to change for user or register with",
+                    "description": "Email address to change for user or register with.",
                     "type": "string",
                     "examples": [
                       "john.smith@gmail.com"
@@ -477,6 +477,90 @@
           },
           "403": {
             "description": "User cannot be authorized or authenticated.",
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "500": {
+            "description": "Server has failed to process request due to internal error.",
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/user": {
+      "post": {
+        "summary": "Register a new user",
+        "description": "To register, you must first generate an email confirmation token by calling the `/token` endpoint with a POST request. Using this token, you can create a new user. Optionally, you can associate the new user with a promotional campaign by including a `promoCode` in the request payload. Along with the user, a never-expiring administrative token is created.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "promoCode": {
+                    "description": "Code of promotional campaign.",
+                    "type": "string",
+                    "default": "default",
+                    "examples": [
+                      "secret"
+                    ]
+                  }
+                },
+                "required": []
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "User is registered.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "description": "User ID.",
+                      "type": "string",
+                      "examples": [
+                        "c75e9dfe-e5cb-4e50-910d-2300435cc9c1"
+                      ]
+                    },
+                    "tokenId": {
+                      "description": "ID of administrative access token.",
+                      "type": "string",
+                      "examples": [
+                        "c75e9dfe-e5cb-4e50-910d-2300435cc9c1"
+                      ]
+                    },
+                    "token": {
+                      "description": "Administrative access token.",
+                      "type": "string",
+                      "examples": [
+                        "vtrerCHjSTymLl/0/plEApckP6dP/lISis3Ecid1Lj+tnMUpchSwD438rLeGvvUV"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "tokenId",
+                    "token"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "User sent a malformed request.",
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "403": {
+            "description": "Email cannot be confirmed.",
             "$ref": "#/components/responses/ErrorResponse"
           },
           "500": {

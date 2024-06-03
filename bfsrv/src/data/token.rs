@@ -140,6 +140,47 @@ impl Token {
         Ok(token.try_into().unwrap())
     }
 
+    /// Update token row columns with the current field values.
+    pub async fn update(&self, client: &impl GenericClient) -> Result<()> {
+        let stmt = client
+            .prepare_cached(
+                r#"
+                UPDATE token
+                   SET created_at = $2,
+                       expires_at = $3,
+                       hash = $4,
+                       label = $5,
+                       "user" = $6,
+                       is_admin = $7,
+                       ip_address = $8,
+                       email = $9
+                 WHERE id = $1
+                "#,
+            )
+            .await
+            .unwrap();
+        client
+            .execute(
+                &stmt,
+                &[
+                    &self.id,
+                    &self.created_at,
+                    &self.expires_at,
+                    &self.hash,
+                    &self.label,
+                    &self.user,
+                    &self.is_admin,
+                    &self.ip_address,
+                    &self
+                        .email
+                        .as_ref()
+                        .map(<EmailAddress as AsRef<str>>::as_ref),
+                ],
+            )
+            .await?;
+        Ok(())
+    }
+
     fn from_row(row: Row) -> Result<Self> {
         let email: Option<&str> = row.try_get("email")?;
         Ok(Self {

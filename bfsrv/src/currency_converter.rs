@@ -39,7 +39,7 @@ impl Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Deserialize)]
-struct RatesResponse {
+struct RatesResponsePayload {
     rates: HashMap<String, Decimal>,
 }
 
@@ -84,10 +84,10 @@ impl CurrencyConverter {
             .await?
             .error_for_status()?;
 
-        let response: RatesResponse = response.json().await?;
+        let payload: RatesResponsePayload = response.json().await?;
 
         let mut state = self.state.write().unwrap();
-        state.rates = response.rates;
+        state.rates = payload.rates;
         state.updated_at = OffsetDateTime::now_utc();
 
         debug!("retrieved currency rates");
