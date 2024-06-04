@@ -5,13 +5,13 @@
     "version": "1.0.0",
     "summary": "Speech-to-text streaming transcription service",
     "contact": {
-      "email": "support@blobfish.ai",
-      "name": "Support"
+      "email": "support@blobfish.no",
+      "name": "Blobfish Support"
     }
   },
   "servers": [
     {
-      "url": "https://blobfish.ai",
+      "url": "https://api.blobfish.no",
       "description": "Blobfish API Server"
     }
   ],
@@ -487,6 +487,96 @@
       }
     },
     "/user": {
+      "get": {
+        "summary": "Get user information",
+        "description": "Typically this endpoint is used to check own balance.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "User information is returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "type": "object",
+                      "description": "User information.",
+                      "properties": {
+                        "id": {
+                          "description": "User ID.",
+                          "type": "string",
+                          "examples": [
+                            "c75e9dfe-e5cb-4e50-910d-2300435cc9c1"
+                          ]
+                        },
+                        "createdAt": {
+                          "description": "User creation date and time (ISO-8601).",
+                          "type": "string",
+                          "examples": [
+                            "2024-06-02T20:20:56Z"
+                          ]
+                        },
+                        "email": {
+                          "description": "User email address.",
+                          "type": "string",
+                          "examples": [
+                            "john.smith@gmail.com"
+                          ]
+                        },
+                        "referrer": {
+                          "description": "ID of referrer who created email confirmation token used to register this user.",
+                          "type": "string",
+                          "examples": [
+                            "c75e9dfe-e5cb-4e50-910d-2300435cc9c1"
+                          ]
+                        },
+                        "campaign": {
+                          "description": "User promotional campaign.",
+                          "type": "string",
+                          "examples": [
+                            "c75e9dfe-e5cb-4e50-910d-2300435cc9c1"
+                          ]
+                        },
+                        "balance": {
+                          "description": "User balance (in USD).",
+                          "type": "string",
+                          "examples": [
+                            "1.23"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "createdAt",
+                        "email",
+                        "campaign",
+                        "balance"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "user"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "User cannot be authorized or authenticated.",
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "500": {
+            "description": "Server has failed to process request due to internal error.",
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      },
       "post": {
         "summary": "Register a new user",
         "description": "To register, you must first generate an email confirmation token by calling the `/token` endpoint with a POST request. Using this token, you can create a new user. Optionally, you can associate the new user with a promotional campaign by including a `promoCode` in the request payload. Along with the user, a never-expiring administrative token is created.",

@@ -11,13 +11,42 @@ use axum_extra::extract::WithRejection;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
-use time::{Date, OffsetDateTime, Time};
+use time::{format_description::well_known::Rfc3339, Date, OffsetDateTime, Time};
 
 /// Body payload for POST-request.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PostRequestPayload {
     promo_code: Option<String>,
+}
+
+/// Handle user GET requests.
+pub async fn handle_user_get(
+    State(server): State<Arc<Server>>,
+    auth: Auth,
+) -> Result<Response> {
+    let user_id = auth.user()?;
+
+    use Error::*;
+    let client = server.pg_pool.get().await?;
+    let Some(user) = User::get(&client, user_id).await? else {
+        return Err(Internal("user not found".to_owned()));
+    };
+
+    let mut json = json!({
+        "user": {
+            "id": user.id,
+            "createdAt": user.created_at.format(&Rfc3339).unwrap(),
+            "email": user.email,
+            "campaign": user.campaign,
+            "balance": user.balance,
+        }
+    });
+    if let Some(referrer) = user.referrer {
+        json["referrer"] = json!(referrer);
+    }
+
+    Ok(Json(json).into_response())
 }
 
 /// Handle user POST requests.

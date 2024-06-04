@@ -224,6 +224,7 @@ impl Server {
             .route("/payment", post(payment::handle_payment_post))
             .route("/token", post(token::handle_token_post))
             .route("/transcribe", get(transcribe::handle_transcribe))
+            .route("/user", get(user::handle_user_get))
             .route("/user", post(user::handle_user_post))
             .fallback(handle_fallback)
             .with_state(self)
