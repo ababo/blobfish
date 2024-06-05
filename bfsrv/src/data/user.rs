@@ -112,7 +112,7 @@ impl User {
                 r#"
                 UPDATE "user"
                    SET created_at = $2,
-                       balance = $3,
+                       balance = $3
                  WHERE id = $1
                 "#,
             )

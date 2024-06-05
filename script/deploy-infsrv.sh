@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Tested with Debian 12 servers.
+# Tested with Debian 12 and Ubuntu 24.04 LTS servers.
 
 set -ex
 
@@ -87,10 +87,5 @@ ssh root@$SSH_ADDRESS 'systemctl daemon-reload'
 ssh root@$SSH_ADDRESS 'systemctl start blobfish-infsrv'
 ssh root@$SSH_ADDRESS 'systemctl enable blobfish-infsrv'
 
-sleep 60 # Give it some time to start.
-if ssh root@$SSH_ADDRESS 'systemctl -q is-active blobfish-infsrv'; then
-    echo "failed to start infsrv"
-    exit 1
-else
-    echo "started infsrv"
-fi
+sleep 30
+ssh root@$SSH_ADDRESS 'systemctl status blobfish-infsrv'
