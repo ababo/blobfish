@@ -5,6 +5,11 @@ build-api-spec:
 	npx @redocly/cli build-docs bfsrv/api.oas.json -o target/api.oas.html
 	open target/api.oas.html
 
+.PHONY: deploy-api-spec
+deploy-api-spec:
+	npx @redocly/cli build-docs bfsrv/api.oas.json -o target/api.oas.html
+	scp -i ${HOME}/.ssh/blobfish target/api.oas.html root@blobfish.no:/home/user-data/www/default/api-spec.html
+
 .PHONY: lint-infsrv
 lint-infsrv:
 	pylint infsrv
