@@ -21,10 +21,7 @@ pub struct PostRequestPayload {
 }
 
 /// Handle user GET requests.
-pub async fn handle_user_get(
-    State(server): State<Arc<Server>>,
-    auth: Auth,
-) -> Result<Response> {
+pub async fn handle_user_get(State(server): State<Arc<Server>>, auth: Auth) -> Result<Response> {
     let user_id = auth.user()?;
 
     use Error::*;

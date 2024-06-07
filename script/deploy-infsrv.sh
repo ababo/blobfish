@@ -84,7 +84,8 @@ EOF
 "
 
 ssh root@$SSH_ADDRESS 'systemctl daemon-reload'
-ssh root@$SSH_ADDRESS 'systemctl start blobfish-infsrv'
+ssh root@$SSH_ADDRESS 'systemctl restart blobfish-infsrv || \
+    systemctl start blobfish-infsrv'
 ssh root@$SSH_ADDRESS 'systemctl enable blobfish-infsrv'
 
 sleep 30

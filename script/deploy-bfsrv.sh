@@ -45,8 +45,8 @@ if [ -z "$PAYPAL_RETURN_URL" ]; then
 fi
 
 if [ -z "$PAYPAL_SANDBOX" ]; then
-    echo "no PAYPAL_RETURN_URL env var is set, using false"
-    PAYPAL_SANDBOX=false
+    PAYPAL_SANDBOX=true
+    echo "no PAYPAL_RETURN_URL env var is set, using $PAYPAL_SANDBOX"
 fi
 
 if [ -z "$PAYPAL_SECRET_KEY" ]; then

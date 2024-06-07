@@ -112,14 +112,23 @@ impl User {
                 r#"
                 UPDATE "user"
                    SET created_at = $2,
-                       balance = $3
+                       balance = $3,
+                       allocated_fee = $4
                  WHERE id = $1
                 "#,
             )
             .await
             .unwrap();
         client
-            .execute(&stmt, &[&self.id, &self.created_at, &self.balance])
+            .execute(
+                &stmt,
+                &[
+                    &self.id,
+                    &self.created_at,
+                    &self.balance,
+                    &self.allocated_fee,
+                ],
+            )
             .await?;
         Ok(())
     }
