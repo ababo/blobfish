@@ -38,7 +38,8 @@ class Server:  # pylint: disable=too-few-public-methods
         log_config = _create_uvicorn_log_config()
         config = uvicorn.Config(app=self._app, loop=loop,
                                 host=address, port=port,
-                                log_config=log_config)
+                                log_config=log_config,
+                                ws_ping_interval=None)
         return await uvicorn.Server(config).serve()
 
 
