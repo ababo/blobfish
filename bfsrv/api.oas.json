@@ -281,7 +281,7 @@
     "/transcribe": {
       "get": {
         "summary": "Transcribe audio stream through websocket (WSS URL scheme)",
-        "description": "User sends a binary audio stream (currently supported Ogg Vorbis only) and receives text messages that contain JSON-encoded segments.<br><br>Examples:<ul><li><code>sox -d -t vorbis -q - | websocat -b &quot;wss://api.blobfish.no/transcribe?tariff=basic&amp;lang=en&quot; -H &quot;Content-Type: audio/ogg; codecs=vorbis&quot; -H &quot;Authorization: Bearer $ACCESS_TOKEN&quot;</code><br><br></li><li><code>{ cat recording.ogg; printf &quot;I&#39;ll be back&quot; } | websocat -b &quot;wss://api.blobfish.no/transcribe?tariff=basic&amp;lang=en&quot; -H &quot;Content-Type: audio/ogg; codecs=vorbis&quot; -H &quot;X-Blobfish-Terminator: I&#39;ll be back&quot; -H &quot;Authorization: Bearer $ACCESS_TOKEN&quot; --no-close</code></li></ul>",
+        "description": "User sends a binary audio stream (currently supported Ogg Vorbis only) and receives text messages that contain JSON-encoded segments.<br><br>Examples:<ul><li><code>sox -d -t vorbis -q - | websocat -bE &quot;wss://api.blobfish.no/transcribe?tariff=basic&amp;lang=en&quot; -H &quot;Content-Type: audio/ogg; codecs=vorbis&quot; -H &quot;Authorization: Bearer $ACCESS_TOKEN&quot;</code><br><br></li><li><code>{ cat recording.ogg; printf &quot;I&#39;ll be back&quot;; } | websocat -b &quot;wss://api.blobfish.no/transcribe?tariff=basic&amp;lang=en&quot; -H &quot;Content-Type: audio/ogg; codecs=vorbis&quot; -H &quot;X-Blobfish-Terminator: I&#39;ll be back&quot; -H &quot;Authorization: Bearer $ACCESS_TOKEN&quot; --no-close</code></li></ul>",
         "security": [
           {
             "BearerAuth": []
