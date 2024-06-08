@@ -3,7 +3,7 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from fastapi import (
     Header, HTTPException, Query, WebSocket, WebSocketDisconnect, status,
@@ -158,13 +158,13 @@ class SegmentHandler:  # pylint: disable=too-few-public-methods
             self._executor, _annotate_window, ctx, data)
 
         segments = ctx.segment_producer.next_window(
-            map(lambda t: (t[0].start, t[0].end),
-                annotation.itertracks()), last)
+            _annotation_intervals(annotation), last)
 
         for segment in segments:
-            _logger.debug('sent %s segment %fs-%fs',
-                          segment.kind, segment.begin, segment.end)
-            await ctx.websocket.send_text(segment.to_json() + '\n')
+            if segment.end - segment.begin > 0.1:
+                _logger.debug('sent %s segment %fs-%fs',
+                              segment.kind, segment.begin, segment.end)
+                await ctx.websocket.send_text(segment.to_json() + '\n')
 
 
 def _annotate_window(ctx: _Context, data: bytes) -> Annotation:
@@ -179,3 +179,18 @@ def _annotate_window(ctx: _Context, data: bytes) -> Annotation:
         waveform /= 2 ** (sample_size * 8 - 1) - 1
     audio = {'waveform': waveform, 'sample_rate': ctx.sample_rate}
     return ctx.pipeline(audio)
+
+
+def _annotation_intervals(
+    annotation: Annotation
+) -> List[Tuple[float, float]]:
+    intervals = []
+    last_end = 0
+
+    for segment, _ in annotation.itertracks():
+        begin = max(segment.start, last_end)
+        if segment.end > begin:
+            intervals.append((begin, segment.end))
+            last_end = segment.end
+
+    return intervals

@@ -186,21 +186,30 @@ async fn process_segments(
     limit_sender: UnboundedSender<f32>,
 ) {
     let mut item = None;
+    let mut consumed = 0.0;
     while let Some(Ok(segment_item)) = infsrv_receiver.recv().await {
         use SegmentItem::*;
-        let (begin, end) = match segment_item {
-            Speech { begin, end } => (begin, end),
-            Void { begin, end } => {
-                debug!("received void segment {}s-{}s", begin, end);
-                if limit_sender.send(end).is_err() {
-                    debug!("failed to send time consumed for void segment");
-                    break;
-                }
-                continue;
-            }
+        let (speech, begin, end) = match segment_item {
+            Speech { begin, end } => (true, begin, end),
+            Void { begin, end } => (false, begin, end),
         };
 
-        debug!("received speech segment {}s-{}s", begin, end);
+        debug!(
+            "received {} segment {begin}s-{end}s",
+            if speech { "speech" } else { "void" }
+        );
+
+        assert!(begin >= consumed);
+        assert!(end > begin);
+        consumed = end;
+
+        if !speech {
+            if limit_sender.send(end).is_err() {
+                debug!("failed to send time consumed for void segment");
+                break;
+            }
+            continue;
+        }
 
         let wav_blob = ring_buffer
             .lock()

@@ -89,9 +89,17 @@ def test_segment_producer() -> None:
     segments = producer.next_window([])  # 1000-1100
     assert segments == [Segment(KIND_VOID, 1000, 1100)]
 
-    segments = producer.next_window(
-        [(20, 30), (50, 99)], last=True)  # 1100-1200
+    segments = producer.next_window([(20, 80)])  # 1100-1200
     assert segments == [Segment(KIND_VOID, 1100, 1120),
-                        Segment(KIND_SPEECH, 1120, 1130),
-                        Segment(KIND_VOID, 1130, 1150),
-                        Segment(KIND_SPEECH, 1150, 1200)]
+                        Segment(KIND_SPEECH, 1120, 1180),
+                        Segment(KIND_VOID, 1180, 1200)]
+
+    segments = producer.next_window([])  # 1200-1300
+    assert segments == [Segment(KIND_VOID, 1200, 1300)]
+
+    segments = producer.next_window(
+        [(20, 30), (50, 99)], last=True)  # 1300-1400
+    assert segments == [Segment(KIND_VOID, 1300, 1320),
+                        Segment(KIND_SPEECH, 1320, 1330),
+                        Segment(KIND_VOID, 1330, 1350),
+                        Segment(KIND_SPEECH, 1350, 1400)]

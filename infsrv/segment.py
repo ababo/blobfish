@@ -1,7 +1,7 @@
 """Speech segmentation logic."""
 
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Iterable, List, Tuple
+from typing import Awaitable, Callable, List, Tuple
 
 from dataclasses_json import dataclass_json
 
@@ -69,12 +69,11 @@ class SegmentProducer:  # pylint: disable=too-few-public-methods
 
     def next_window(
         self,
-        intervals: Iterable[Tuple[float, float]],
+        intervals: List[Tuple[float, float]],
         last: bool = False
     ) -> List[Segment]:
         """Add next window intervals and return next ready-made segments."""
         window_end = self._time_offset + self._window_duration
-        intervals = list(intervals)
 
         segments = []
         if len(intervals) == 0:
@@ -119,6 +118,7 @@ class SegmentProducer:  # pylint: disable=too-few-public-methods
             begin = segments[-1].end \
                 if len(segments) > 0 else self._time_offset
             _append_segment(segments, KIND_VOID, begin, window_end)
+            self._trailing_begin = window_end
         else:  # avoid carrying too long trailing speech segments
             while window_end - self._trailing_begin \
                     > self._max_segment_duration:
