@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from argparse import ArgumentError, ArgumentParser, Namespace
+from argparse import ArgumentParser, Namespace
 import asyncio
 import json
 import logging
@@ -27,10 +27,12 @@ def _parse_args() -> Namespace:
         '--header', action='append', nargs=2, metavar=('KEY', 'VALUE'),
         default=[('Content-Type', 'audio/ogg; codecs=vorbis')])
     parser.add_argument('-g', '--language', default=env('LANGUAGE'))
+    parser.add_argument('-k', '--access-token', default=env('ACCESS_TOKEN'))
     parser.add_argument('-l', '--log-level', default=env('LOG_LEVEL', 'INFO'))
     parser.add_argument('-p', '--server-port',
                         default=env('SERVER_PORT', '9321'))
     parser.add_argument('-r', '--recording', default=env('RECORDING'))
+    parser.add_argument('-s', '--enable-ssl', default=False)
     parser.add_argument('-t', '--tariff', default=env('TARIFF', 'basic'))
     parser.add_argument('--terminator', default=env(
         'TERMINATOR', 'measure-accuracy-terminator'))
@@ -69,9 +71,11 @@ async def transcribe(
     language = args.language if language is None else language
     address = f'{args.server_address}:{args.server_port}'
     query = f'tariff={args.tariff}&lang={language}'
-    url = f'ws://{address}/transcribe?{query}'
+    proto = 'wss' if args.enable_ssl else 'ws'
+    url = f'{proto}://{address}/transcribe?{query}'
 
     headers = dict(args.header)
+    headers['Authorization'] = f'Bearer {args.access_token}'
     headers['X-Blobfish-Terminator'] = args.terminator
 
     async with connect(url, extra_headers=headers, ping_interval=None) as ws:
