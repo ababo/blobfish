@@ -109,7 +109,17 @@ async def measure_recording_accuracy(
         logging.info(
             f'{language}/{recording} reference text:\n\n{expected_text}\n')
 
-    actual_text = await transcribe(args, ogg_file, language)
+    num_tries = 3
+    for i in range(num_tries):
+        try:
+            actual_text = await transcribe(args, ogg_file, language)
+            break
+        except Exception as err:
+            if i == num_tries - 1:
+                raise
+            logging.warning(
+                f'failed to transcribe {language}/{recording}: {err}')
+
     logging.info(
         f'{language}/{recording} transcribed text:\n\n{actual_text}\n')
 
