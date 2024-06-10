@@ -22,6 +22,8 @@
         "lettre",
         "levelname",
         "lpcm",
+        "maxsd",
+        "minsd",
         "msecs",
         "oneshot",
         "openai",

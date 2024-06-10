@@ -50,22 +50,35 @@ class Segment:
         self.begin = begin
         self.end = end
 
+    def duration(self):
+        """Segment duration."""
+        return self.end - self.begin
 
-class SegmentProducer:  # pylint: disable=too-few-public-methods
+
+# pylint: disable=too-few-public-methods
+# pylint: disable=too-many-instance-attributes
+class SegmentProducer:
     """Converts in-window intervals into continuous time segments."""
 
     def __init__(
         self,
         window_duration: float,
+        min_speech_duration: float,
         max_segment_duration: float,
         time_epsilon: float,
     ) -> None:
+        assert min_speech_duration <= max_segment_duration
+
         self._window_duration = window_duration
+        self._min_speech_duration = min_speech_duration
         self._max_segment_duration = max_segment_duration
         self._time_epsilon = time_epsilon
+
         self._trailing_begin = 0
         self._trailing_kind = KIND_VOID
         self._time_offset = 0
+
+        self._trailing_segment: Segment | None = None
 
     def next_window(
         self,
@@ -131,10 +144,35 @@ class SegmentProducer:  # pylint: disable=too-few-public-methods
             _append_segment(segments, KIND_SPEECH,
                             self._trailing_begin, window_end)
 
+        segments = self._merge_segments(segments, last)
         _split_segments(segments, self._max_segment_duration)
 
         self._time_offset += self._window_duration
         return segments
+
+    def _merge_segments(
+        self,
+        segments: List[Segment],
+        last: bool
+    ) -> List[Segment]:
+        merged_segments = []
+        for segment in segments:
+            if self._trailing_segment is not None:
+                self._trailing_segment.end = segment.end
+                if self._trailing_segment.duration() >= \
+                        self._min_speech_duration:
+                    merged_segments.append(self._trailing_segment)
+                    self._trailing_segment = None
+            elif segment.kind == KIND_SPEECH and \
+                    segment.duration() < self._min_speech_duration:
+                self._trailing_segment = segment
+            else:
+                merged_segments.append(segment)
+
+        if last and self._trailing_segment is not None:
+            merged_segments.append(self._trailing_segment)
+
+        return merged_segments
 
 
 def _append_segment(segments: List[Segment],

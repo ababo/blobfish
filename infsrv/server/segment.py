@@ -58,7 +58,8 @@ class SegmentHandler:  # pylint: disable=too-few-public-methods
     async def endpoint(
         self,
         websocket: WebSocket,
-        max_segment_duration: float = Query(..., alias='msd'),
+        min_speech_duration: float = Query(..., alias='minsd'),
+        max_segment_duration: float = Query(..., alias='maxsd'),
         num_channels: int = Query(..., alias='nc'),
         sample_rate: float = Query(..., alias='sr'),
         sample_type: str = Query(..., alias='st'),
@@ -74,11 +75,23 @@ class SegmentHandler:  # pylint: disable=too-few-public-methods
         # pylint: disable=too-many-return-statements
         await websocket.accept()
 
-        if max_segment_duration < 10 or max_segment_duration > 90:
+        if min_speech_duration < 1 or min_speech_duration > 60:
             await websocket.close(
                 status.WS_1002_PROTOCOL_ERROR,
                 'missing, malformed or unsupported '
-                "'msd' (max segment duration) query parameter")
+                "'minsd' (min speech duration) query parameter")
+            return
+
+        if max_segment_duration < 5 or max_segment_duration > 300:
+            await websocket.close(
+                status.WS_1002_PROTOCOL_ERROR,
+                'missing, malformed or unsupported '
+                "'maxsd' (max segment duration) query parameter")
+            return
+
+        if min_speech_duration > max_segment_duration:
+            await websocket.close(
+                status.WS_1002_PROTOCOL_ERROR, "'minsd' greater than 'maxsd'")
             return
 
         if num_channels < 1 or num_channels > 8:
@@ -126,7 +139,7 @@ class SegmentHandler:  # pylint: disable=too-few-public-methods
             else bytes(terminator, encoding='ISO-8859-1')
 
         segment_producer = SegmentProducer(
-            window_duration, max_segment_duration, 0.1)
+            window_duration, min_speech_duration, max_segment_duration, 0.1)
         ctx = _Context(websocket, num_channels, sample_rate, sample_type,
                        self._pipelines[capability], segment_producer)
 

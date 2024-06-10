@@ -43,7 +43,7 @@ async def test_chunk_divider() -> None:
 
 def test_segment_producer() -> None:
     """Perform SegmentProducer sanity test."""
-    producer = SegmentProducer(100, 150, 2)
+    producer = SegmentProducer(100, 5, 150, 2)
 
     segments = producer.next_window([(0, 10), (20, 50), (75, 99)])  # 0-100
     assert segments == [Segment(KIND_SPEECH, 0, 10),
@@ -103,3 +103,21 @@ def test_segment_producer() -> None:
                         Segment(KIND_SPEECH, 1320, 1330),
                         Segment(KIND_VOID, 1330, 1350),
                         Segment(KIND_SPEECH, 1350, 1400)]
+
+
+def test_segment_producer_min_speech_duration() -> None:
+    """Perform SegmentProducer min_speech_duration test."""
+    producer = SegmentProducer(100, 40, 150, 2)
+
+    segments = producer.next_window([(0, 10), (20, 50), (75, 99)])  # 0-100
+    assert segments == [Segment(KIND_SPEECH, 0, 50),
+                        Segment(KIND_VOID, 50, 75)]
+
+    segments = producer.next_window([(5, 20), (50, 70)])  # 100-200
+    assert segments == [Segment(KIND_SPEECH, 75, 120),
+                        Segment(KIND_VOID, 120, 150),
+                        Segment(KIND_SPEECH, 150, 200)]
+
+    segments = producer.next_window([(80, 90)], last=True)  # 200-300
+    assert segments == [Segment(KIND_VOID, 200, 280),
+                        Segment(KIND_SPEECH, 280, 300)]

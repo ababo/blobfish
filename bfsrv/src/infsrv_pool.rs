@@ -29,8 +29,11 @@ const CAPABILITIES_HEADER: &str = "X-Blobfish-Capabilities";
 /// Stream terminator header name.
 pub const TERMINATOR_HEADER: &str = "X-Blobfish-Terminator";
 
-/// Max speech segment duration.
-pub const MAX_SEGMENT_DURATION: f32 = 30.0;
+/// Minimum speech segment duration.
+pub const MIN_SPEECH_DURATION: f32 = 15.0;
+
+/// Maximum segment duration.
+pub const MAX_SEGMENT_DURATION: f32 = 60.0;
 
 /// Economical sample rate that is enough for speech recognition.
 pub const SAMPLE_RATE: f32 = 16000.0;
@@ -138,7 +141,11 @@ impl InfsrvPool {
         let mut url = Url::parse("ws://127.0.0.1:9322/segment").unwrap();
         url.set_ip_host(allocation.ip_address()).unwrap();
         url.query_pairs_mut()
-            .append_pair("msd", &(MAX_SEGMENT_DURATION - WINDOW_DURATION).to_string())
+            .append_pair("minsd", &MIN_SPEECH_DURATION.to_string())
+            .append_pair(
+                "maxsd",
+                &(MAX_SEGMENT_DURATION - WINDOW_DURATION).to_string(),
+            )
             .append_pair("nc", "1")
             .append_pair("sr", &SAMPLE_RATE.to_string())
             .append_pair("st", "i16")
