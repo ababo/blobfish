@@ -17,9 +17,72 @@
   ],
   "paths": {
     "/payment": {
+      "get": {
+        "summary": "Get user payments",
+        "description": "This method retrieves payment data for the authorized user. If a payment ID is specified only the corresponding payment will be returned.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "header",
+            "description": "Payment ID.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "examples": [
+                "40d3699b-85b9-45fd-8d93-26f3832e7717"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns payment data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "payments": {
+                      "description": "Payment items.",
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Payment"
+                      }
+                    }
+                  },
+                  "required": [
+                    "payments"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "User sent a malformed request.",
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "403": {
+            "description": "User cannot be authorized or authenticated.",
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "description": "Payment not found.",
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "500": {
+            "description": "Server has failed to process request due to internal error.",
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      },
       "patch": {
         "summary": "Top up user's balance by confirming completed payment",
-        "description": "This method makes the backend check status of the payment and top up balance if it's completed.",
+        "description": "This method updates status of the payment (specified either by its ID or reference) and optionally completes it by topping up the recipient balance.",
         "requestBody": {
           "required": true,
           "content": {
@@ -27,39 +90,49 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "id": {
+                    "description": "Payment ID.",
+                    "type": "string",
+                    "examples": [
+                      "40d3699b-85b9-45fd-8d93-26f3832e7717"
+                    ]
+                  },
                   "reference": {
-                    "description": "Payment reference returned by /payment POST.",
+                    "description": "Payment reference.",
                     "type": "string",
                     "examples": [
                       "5JJ76501HR1068729"
                     ]
+                  },
+                  "complete": {
+                    "description": "Complete the payment and top up the recipient balance. If false or not specified the payment status will be updated, but the recipient balance won't be topped up yet.",
+                    "type": "boolean"
                   }
-                }
+                },
+                "examples": [
+                  {
+                    "id": "40d3699b-85b9-45fd-8d93-26f3832e7717",
+                    "complete": true
+                  },
+                  {
+                    "reference": "5JJ76501HR1068729",
+                    "complete": false
+                  }
+                ],
+                "required": []
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Returns a payment status. If it's \"completed\" then the payment is confirmed and the balance has been topped up.",
+            "description": "Returns an empty object.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "properties": {
-                    "status": {
-                      "description": "Payment status.",
-                      "type": "string",
-                      "enum": [
-                        "new",
-                        "canceled",
-                        "completed"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "status"
-                  ]
+                  "properties": {},
+                  "required": []
                 }
               }
             }
@@ -80,7 +153,7 @@
       },
       "post": {
         "summary": "Create a new payment",
-        "description": "User creates a new payment by specifying the related details, then follows a URL that is returned to complete it.",
+        "description": "User creates a new payment by specifying the related details, then follows a checkout URL to proceed with it.",
         "security": [
           {
             "BearerAuth": []
@@ -94,14 +167,14 @@
                 "type": "object",
                 "properties": {
                   "currency": {
-                    "description": "Payment currency.",
+                    "description": "Payment currency (ISO-4217).",
                     "type": "string",
                     "examples": [
                       "USD"
                     ]
                   },
-                  "amount": {
-                    "description": "Payment amount.",
+                  "grossAmount": {
+                    "description": "Payment amount that includes fees of the payment processor. The actual amount to be topped up will likely be less due to the fees above.",
                     "type": "number",
                     "examples": [
                       12.34
@@ -115,7 +188,7 @@
                     ]
                   },
                   "toUser": {
-                    "description": "Receiving user UUID (the calling user if omitted).",
+                    "description": "Receiving user ID (the calling user if omitted).",
                     "type": "string",
                     "examples": [
                       "40d3699b-85b9-45fd-8d93-26f3832e7717"
@@ -128,7 +201,7 @@
                 },
                 "required": [
                   "currency",
-                  "amount",
+                  "grossAmount",
                   "processor"
                 ]
               }
@@ -143,24 +216,13 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "reference": {
-                      "description": "Payment ID registered at the specified processor.",
-                      "type": "string",
-                      "examples": [
-                        "5JJ76501HR1068729"
-                      ]
-                    },
-                    "url": {
-                      "description": "URL to follow for payment completion.",
-                      "type": "string",
-                      "examples": [
-                        "https://www.paypal.com/checkoutnow?token=5JJ76501HR1068729"
-                      ]
+                    "payment": {
+                      "description": "Created payment details.",
+                      "$ref": "#/components/schemas/Payment"
                     }
                   },
                   "required": [
-                    "reference",
-                    "url"
+                    "payment"
                   ]
                 }
               }
@@ -667,6 +729,104 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "Access token."
+      }
+    },
+    "schemas": {
+      "Payment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Payment ID.",
+            "type": "string",
+            "examples": [
+              "40d3699b-85b9-45fd-8d93-26f3832e7717"
+            ]
+          },
+          "createdAt": {
+            "description": "Payment creation date and time (ISO-8601).",
+            "type": "string",
+            "examples": [
+              "2024-06-02T20:20:56Z"
+            ]
+          },
+          "status": {
+            "description": "Payment status.",
+            "type": "string",
+            "enum": [
+              "new",
+              "approved",
+              "completed",
+              "canceled"
+            ]
+          },
+          "currency": {
+            "description": "Payment currency (ISO-4217)",
+            "type": "string",
+            "examples": [
+              "USD"
+            ]
+          },
+          "grossAmount": {
+            "description": "Payment amount that includes fees of the payment processor.",
+            "type": "string",
+            "examples": [
+              "1.23"
+            ]
+          },
+          "netAmount": {
+            "description": "Amount by which the user balance was topped up.",
+            "type": "string",
+            "examples": [
+              "1.23"
+            ]
+          },
+          "fromUser": {
+            "description": "Paying user ID.",
+            "type": "string",
+            "examples": [
+              "40d3699b-85b9-45fd-8d93-26f3832e7717"
+            ]
+          },
+          "toUser": {
+            "description": "Recipient user ID.",
+            "type": "string",
+            "examples": [
+              "40d3699b-85b9-45fd-8d93-26f3832e7717"
+            ]
+          },
+          "processor": {
+            "description": "Payment processor.",
+            "type": "string",
+            "enum": [
+              "paypal"
+            ]
+          },
+          "reference": {
+            "description": "Payment processor reference.",
+            "type": "string",
+            "examples": [
+              "5JJ76501HR1068729"
+            ]
+          },
+          "checkoutLink": {
+            "description": "URL to follow to proceed with the payment.",
+            "type": "string",
+            "examples": [
+              "https://www.paypal.com/checkoutnow?token=8KV76000Y68343635"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "createdAt",
+          "status",
+          "currency",
+          "grossAmount",
+          "fromUser",
+          "toUser",
+          "processor",
+          "reference"
+        ]
       }
     },
     "responses": {

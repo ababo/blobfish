@@ -82,14 +82,15 @@ CREATE INDEX node_capability_node_idx ON node_capability(node);
 
 CREATE TYPE payment_processor AS ENUM('paypal');
 
-CREATE TYPE payment_status AS ENUM('new', 'completed', 'canceled');
+CREATE TYPE payment_status AS ENUM('new', 'approved', 'completed', 'canceled');
 
 CREATE TABLE payment(
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   status payment_status NOT NULL,
   currency text NOT NULL,
-  amount decimal NOT NULL,
+  gross_amount decimal NOT NULL,
+  net_amount decimal,
   from_user uuid NOT NULL,
   to_user uuid NOT NULL,
   processor payment_processor NOT NULL,

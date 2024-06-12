@@ -12,11 +12,12 @@ use uuid::Uuid;
 #[serde(rename_all = "snake_case")]
 pub enum PaymentStatus {
     New,
+    Approved,
     Completed,
     Canceled,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, ToSql, FromSql)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, ToSql, FromSql)]
 #[postgres(name = "payment_processor", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum PaymentProcessor {
@@ -29,7 +30,8 @@ pub struct Payment {
     pub created_at: OffsetDateTime,
     pub status: PaymentStatus,
     pub currency: String,
-    pub amount: Decimal,
+    pub gross_amount: Decimal,
+    pub net_amount: Option<Decimal>,
     pub from_user: Uuid,
     pub to_user: Uuid,
     pub processor: PaymentProcessor,
@@ -41,7 +43,7 @@ impl Payment {
     /// Create a new Payment instance.
     pub fn new(
         currency: String,
-        amount: Decimal,
+        gross_amount: Decimal,
         from_user: Uuid,
         to_user: Uuid,
         processor: PaymentProcessor,
@@ -52,13 +54,30 @@ impl Payment {
             created_at: OffsetDateTime::UNIX_EPOCH,
             status: PaymentStatus::New,
             currency,
-            amount,
+            gross_amount,
+            net_amount: None,
             from_user,
             to_user,
             processor,
             reference,
             details: None,
         }
+    }
+
+    /// Get a payment with a given ID.
+    pub async fn get(client: &impl GenericClient, id: Uuid) -> Result<Option<Self>> {
+        let stmt = client
+            .prepare_cached(
+                "
+                SELECT *
+                  FROM payment
+                 WHERE id = $1
+                ",
+            )
+            .await
+            .unwrap();
+        let row = client.query_opt(&stmt, &[&id]).await?;
+        row.map(Self::from_row).transpose()
     }
 
     /// Get a payment with a given reference.
@@ -89,13 +108,14 @@ impl Payment {
                     payment(
                         status,
                         currency,
-                        amount,
+                        gross_amount,
+                        net_amount,
                         from_user,
                         to_user,
                         processor,
                         reference,
                         details)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
              RETURNING id, created_at
                 ",
             )
@@ -108,7 +128,8 @@ impl Payment {
                 &[
                     &self.status,
                     &self.currency,
-                    &self.amount,
+                    &self.gross_amount,
+                    &self.net_amount,
                     &self.from_user,
                     &self.to_user,
                     &self.processor,
@@ -123,11 +144,8 @@ impl Payment {
         Ok(())
     }
 
-    /// Find last payment with a given from_user.
-    pub async fn find_last_with_from_user(
-        client: &impl GenericClient,
-        from_user: Uuid,
-    ) -> Result<Option<Self>> {
+    /// Find payments from a given user. The payments are sorted by created_at in descending order.
+    pub async fn find_from_user(client: &impl GenericClient, user: Uuid) -> Result<Vec<Self>> {
         let stmt = client
             .prepare_cached(
                 "
@@ -135,13 +153,12 @@ impl Payment {
                   FROM payment
                  WHERE from_user = $1
                  ORDER BY created_at DESC
-                 LIMIT 1
                 ",
             )
             .await
             .unwrap();
-        let row = client.query_opt(&stmt, &[&from_user]).await?;
-        row.map(Self::from_row).transpose()
+        let rows = client.query(&stmt, &[&user]).await?;
+        rows.into_iter().map(Self::from_row).collect()
     }
 
     /// Update payment row columns with the current field values.
@@ -153,12 +170,13 @@ impl Payment {
                    SET created_at = $2,
                        status = $3,
                        currency = $4,
-                       amount = $5,
-                       from_user = $6,
-                       to_user = $7,
-                       processor = $8,
-                       reference = $9,
-                       details = $10
+                       gross_amount = $5,
+                       net_amount = $6,
+                       from_user = $7,
+                       to_user = $8,
+                       processor = $9,
+                       reference = $10,
+                       details = $11
                  WHERE id = $1
                 ",
             )
@@ -172,7 +190,8 @@ impl Payment {
                     &self.created_at,
                     &self.status,
                     &self.currency,
-                    &self.amount,
+                    &self.gross_amount,
+                    &self.net_amount,
                     &self.from_user,
                     &self.to_user,
                     &self.processor,
@@ -190,7 +209,8 @@ impl Payment {
             created_at: row.try_get("created_at")?,
             status: row.try_get("status")?,
             currency: row.try_get("currency")?,
-            amount: row.try_get("amount")?,
+            gross_amount: row.try_get("gross_amount")?,
+            net_amount: row.try_get("net_amount")?,
             from_user: row.try_get("from_user")?,
             to_user: row.try_get("to_user")?,
             processor: row.try_get("processor")?,

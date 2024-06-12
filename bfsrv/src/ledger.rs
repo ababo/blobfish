@@ -138,7 +138,7 @@ impl Ledger {
         });
 
         let mut interval = interval(Duration::from_millis(10));
-        let mut remains = 10;
+        let mut remains = 100;
 
         use Error::*;
         let node = loop {

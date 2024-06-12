@@ -6,7 +6,7 @@ use crate::{
     server::{middleware::Auth, Error, Result, Server},
 };
 use axum::{
-    extract::{Json, State},
+    extract::{Json, Query, State},
     response::{IntoResponse, Response},
 };
 use axum_extra::extract::WithRejection;
@@ -16,15 +16,71 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::json;
 use std::{sync::Arc, time::Duration};
-use time::OffsetDateTime;
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use tokio::time::interval;
 use tokio_postgres::{error::SqlState, IsolationLevel};
 use uuid::Uuid;
 
+/// Payment GET request query.
+#[derive(Deserialize)]
+pub struct PaymentQuery {
+    id: Option<Uuid>,
+}
+
+pub async fn handle_payment_get(
+    State(server): State<Arc<Server>>,
+    auth: Auth,
+    WithRejection(Query(query), _): WithRejection<Query<PaymentQuery>, Error>,
+) -> Result<Response> {
+    let user = auth.user()?;
+    let client = server.pg_pool.get().await?;
+
+    let payments = if let Some(id) = query.id {
+        use Error::*;
+        let Some(payment) = Payment::get(&client, id).await? else {
+            return Err(PaymentNotFound);
+        };
+        if payment.from_user != user {
+            return Err(PaymentNotFound);
+        }
+        vec![get_payment_item(server.as_ref(), &payment)]
+    } else {
+        Payment::find_from_user(&client, user)
+            .await?
+            .iter()
+            .map(|p| get_payment_item(server.as_ref(), p))
+            .collect()
+    };
+
+    Ok(Json(json!({ "payments": payments })).into_response())
+}
+
+fn get_payment_item(server: &Server, payment: &Payment) -> serde_json::Value {
+    let checkout_link = match payment.processor {
+        PaymentProcessor::Paypal => server.paypal.get_checkout_link(payment),
+    };
+
+    json!({
+        "id": payment.id,
+        "createdAt": payment.created_at.format(&Rfc3339).unwrap(),
+        "status": payment.status,
+        "currency": payment.currency,
+        "grossAmount": payment.gross_amount,
+        "netAmount": payment.net_amount,
+        "fromUser": payment.from_user,
+        "toUser": payment.to_user,
+        "processor": payment.processor,
+        "reference": payment.reference,
+        "checkoutLink": checkout_link,
+    })
+}
+
 /// Body payload for PATCH-request.
 #[derive(Deserialize)]
 pub struct PatchRequestPayload {
-    reference: String,
+    id: Option<Uuid>,
+    reference: Option<String>,
+    complete: Option<bool>,
 }
 
 /// Handle payment PATCH requests.
@@ -34,30 +90,75 @@ pub async fn handle_payment_patch(
 ) -> Result<Response> {
     let mut client = server.pg_pool.get().await?;
 
-    let mut interval = interval(Duration::from_millis(10));
-    let mut remains = 100;
+    use Error::*;
 
-    loop {
-        interval.tick().await;
+    let maybe_payment = if let Some(id) = payload.id {
+        Payment::get(&client, id).await?
+    } else if let Some(reference) = payload.reference {
+        Payment::get_by_reference(&client, reference.as_ref()).await?
+    } else {
+        None
+    };
+    let Some(mut payment) = maybe_payment else {
+        return Err(PaymentNotFound);
+    };
 
-        let result =
-            try_update_payment_status_atomically(server.as_ref(), &payload, &mut client).await;
-        if !is_serialization_failure(&result) {
-            break result;
-        }
-
-        remains -= 1;
-        if remains == 0 {
-            break result;
+    let complete = payload.complete.unwrap_or_default();
+    match payment.processor {
+        PaymentProcessor::Paypal => {
+            server.paypal.update_payment(&mut payment).await?;
+            payment.update(&client).await?;
+            if complete {
+                server.paypal.complete_payment(&mut payment).await?;
+            }
         }
     }
+
+    if complete {
+        let net_amount = payment.net_amount.ok_or_else(|| {
+            Internal(format!(
+                "failed to get net_amount for payment {}",
+                payment.id
+            ))
+        })?;
+
+        let Some(amount) = server
+            .currency_converter
+            .convert(&payment.currency, net_amount)
+            .await?
+        else {
+            return Err(Internal(format!(
+                "failed to convert currency for payment {}",
+                payment.id
+            )));
+        };
+
+        let mut interval = interval(Duration::from_millis(10));
+        let mut remains = 100;
+
+        loop {
+            interval.tick().await;
+
+            let result = try_top_up_balance_atomically(&mut client, &payment, amount).await;
+            if !is_serialization_failure(&result) {
+                break result;
+            }
+
+            remains -= 1;
+            if remains == 0 {
+                break result;
+            }
+        }?;
+    }
+
+    Ok(Json(json!({})).into_response())
 }
 
-async fn try_update_payment_status_atomically(
-    server: &Server,
-    payload: &PatchRequestPayload,
+async fn try_top_up_balance_atomically(
     client: &mut Client,
-) -> Result<Response> {
+    payment: &Payment,
+    amount: Decimal,
+) -> Result<()> {
     let tx = client
         .build_transaction()
         .isolation_level(IsolationLevel::RepeatableRead)
@@ -65,58 +166,28 @@ async fn try_update_payment_status_atomically(
         .await?;
 
     use Error::*;
-    let Some(mut payment) = Payment::get_by_reference(&tx, &payload.reference).await? else {
-        return Err(PaymentNotFound);
-    };
-
-    use PaymentStatus::*;
-    if !matches!(payment.status, New) {
-        return Ok(Json(json!({ "status": payment.status })).into_response());
-    }
-
-    let (status, details) = match payment.processor {
-        PaymentProcessor::Paypal => server.paypal.retrieve_status(&payment.reference).await?,
-    };
-
-    if !matches!(status, Completed) {
-        payment.status = status;
-        payment.details = details;
-        payment.update(&tx).await?;
-        tx.commit().await?;
-        return Ok(Json(json!({ "status": payment.status })).into_response());
-    }
-
-    let Some(amount) = server
-        .currency_converter
-        .convert(&payment.currency, payment.amount)
+    let status = Payment::get(&tx, payment.id)
         .await?
-    else {
-        return Err(Internal(format!(
-            "failed to get currency rate for payment {}",
-            payment.id
-        )));
-    };
-
-    let mut payment = Payment::get_by_reference(&tx, &payload.reference)
-        .await?
-        .unwrap();
-    payment.status = status;
-    payment.details = details;
-    payment.update(&tx).await?;
+        .ok_or_else(|| Internal(format!("failed to get payment {}", payment.id)))?
+        .status;
+    if !matches!(status, PaymentStatus::Approved) {
+        return Err(BadPaymentStatus);
+    }
 
     let Some(mut user) = User::get(&tx, payment.to_user).await? else {
         return Err(Internal(format!(
-            "failed to get to_user for payment {}",
+            "failed to get from_user for payment {}",
             payment.id
         )));
     };
+
+    payment.update(&tx).await?;
     user.balance += amount;
     user.update(&tx).await?;
-
     tx.commit().await?;
 
     info!("completed payment {}", payment.id);
-    Ok(Json(json!({ "status": payment.status })).into_response())
+    Ok(())
 }
 
 #[inline]
@@ -132,7 +203,7 @@ fn is_serialization_failure<T>(error: &Result<T>) -> bool {
 #[serde(rename_all = "camelCase")]
 pub struct PostRequestPayload {
     currency: String,
-    amount: Decimal,
+    gross_amount: Decimal,
     processor: PaymentProcessor,
     to_user: Option<Uuid>,
     locale: Option<String>,
@@ -145,39 +216,38 @@ pub async fn handle_payment_post(
     WithRejection(Json(payload), _): WithRejection<Json<PostRequestPayload>, Error>,
 ) -> Result<Response> {
     let user = auth.user()?;
-
     let client = server.pg_pool.get().await?;
-    if let Some(payment) = Payment::find_last_with_from_user(&client, user).await? {
-        if payment.created_at > OffsetDateTime::now_utc() - Duration::from_secs(3600) {
+
+    let payments = Payment::find_from_user(&client, user).await?;
+    if let Some(created_at) = payments.first().map(|p| p.created_at) {
+        if created_at > OffsetDateTime::now_utc() - Duration::from_secs(3600) {
             return Err(Error::BadRequest(
                 "too frequent payment requests".to_owned(),
             ));
         }
-    }
+    };
 
-    use PaymentProcessor::*;
-    let (reference, url) = match payload.processor {
-        Paypal => {
+    let mut payment = match payload.processor {
+        PaymentProcessor::Paypal => {
             server
                 .paypal
-                .initiate(&payload.currency, payload.amount, payload.locale.as_deref())
+                .create_payment(
+                    payload.currency,
+                    payload.gross_amount,
+                    user,
+                    payload.to_user.unwrap_or(user),
+                    payload.locale.as_deref(),
+                )
                 .await?
         }
     };
 
-    let mut payment = Payment::new(
-        payload.currency,
-        payload.amount,
-        user,
-        payload.to_user.unwrap_or(user),
-        payload.processor,
-        reference.clone(),
-    );
     payment.insert(&client).await?;
 
     info!(
-        "initiated payment {} of {} {}",
-        payment.id, payment.amount, payment.currency
+        "created payment {} of {} {}",
+        payment.id, payment.gross_amount, payment.currency
     );
-    Ok(Json(json!({ "reference": reference, "url": url })).into_response())
+    let item = get_payment_item(server.as_ref(), &payment);
+    Ok(Json(json!({ "payment": item })).into_response())
 }

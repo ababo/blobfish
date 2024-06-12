@@ -20,8 +20,10 @@ use axum::{
 };
 use deadpool_postgres::Pool as PgPool;
 use log::{debug, error, info};
+use reqwest::{header::CONTENT_TYPE, Method};
 use serde_json::json;
 use std::{future::Future, net::SocketAddr, sync::Arc};
+use tower_http::cors::{Any, CorsLayer};
 
 /// Server error.
 #[derive(Debug, thiserror::Error)]
@@ -44,6 +46,8 @@ pub enum Error {
         #[source]
         rejection::QueryRejection,
     ),
+    #[error("bad payment status")]
+    BadPaymentStatus,
     #[error("bad request ({0})")]
     BadRequest(String),
     #[error("promotion campaign not found")]
@@ -92,7 +96,7 @@ pub enum Error {
     ),
     #[error("payment not found")]
     PaymentNotFound,
-    #[error("paypal")]
+    #[error("paypal error")]
     Paypal(
         #[from]
         #[source]
@@ -121,6 +125,7 @@ impl Error {
             | BadRequest(_)
             | CampaignNotFound
             | EmailAlreadyRegistered => StatusCode::BAD_REQUEST,
+            BadPaymentStatus => StatusCode::UNPROCESSABLE_ENTITY,
             CurrencyConverter(err) => err.status(),
             Data(err) => err.status(),
             HandlerNotFound | PaymentNotFound => StatusCode::NOT_FOUND,
@@ -139,6 +144,7 @@ impl Error {
             Axum(_) => "axum",
             AxumJsonRejection(_) => "axum_json_rejection",
             AxumQueryRejection(_) => "axum_query_rejection",
+            BadPaymentStatus => "bad_payment_status",
             BadRequest(_) => "bad_request",
             CampaignNotFound => "campaign_not_found",
             CurrencyConverter(err) => err.code(),
@@ -219,7 +225,14 @@ impl Server {
             Err(Error::HandlerNotFound)
         }
 
+        // Enable page-status.html to call /payment PATCH.
+        let cors = CorsLayer::new()
+            .allow_headers([CONTENT_TYPE])
+            .allow_methods([Method::GET, Method::PATCH, Method::POST])
+            .allow_origin(Any);
+
         let app = Router::<Arc<Server>>::new()
+            .route("/payment", get(payment::handle_payment_get))
             .route("/payment", patch(payment::handle_payment_patch))
             .route("/payment", post(payment::handle_payment_post))
             .route("/token", post(token::handle_token_post))
@@ -228,6 +241,7 @@ impl Server {
             .route("/user", post(user::handle_user_post))
             .fallback(handle_fallback)
             .with_state(self)
+            .layer(cors)
             .into_make_service_with_connect_info::<SocketAddr>();
 
         info!("started HTTP/WS server");

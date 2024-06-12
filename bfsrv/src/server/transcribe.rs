@@ -434,8 +434,8 @@ impl AudioStreamProcessor {
                         let io_err = IoError::new(IoErrorKind::Other, err);
                         if sender.send(Err(io_err)).await.is_err() {
                             debug!("failed to send error to packet reader");
-                            break;
                         }
+                        break;
                     }
                 }
             }

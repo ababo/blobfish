@@ -30,7 +30,7 @@ if [ -z "$DATABASE_URL" ]; then
 fi
 
 if [ -z "$PAYPAL_CANCEL_URL" ]; then
-    PAYPAL_CANCEL_URL=https://blobfish.no/finish_payment.html
+    PAYPAL_CANCEL_URL=https://blobfish.no/payment-status.html
     echo "no PAYPAL_CANCEL_URL env var is set, using $PAYPAL_CANCEL_URL"
 fi
 
@@ -40,7 +40,7 @@ if [ -z "$PAYPAL_CLIENT_ID" ]; then
 fi
 
 if [ -z "$PAYPAL_RETURN_URL" ]; then
-    PAYPAL_RETURN_URL=https://blobfish.no/finish_payment.html
+    PAYPAL_RETURN_URL=https://blobfish.no/payment-status.html
     echo "no PAYPAL_RETURN_URL env var is set, using $PAYPAL_RETURN_URL"
 fi
 
