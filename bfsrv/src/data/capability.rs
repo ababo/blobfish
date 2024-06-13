@@ -15,6 +15,7 @@ pub enum TaskType {
 
 /// Node capability.
 pub struct Capability {
+    #[allow(dead_code)]
     pub id: Uuid,
     pub name: String,
     pub compute_load: u32,

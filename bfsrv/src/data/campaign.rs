@@ -7,6 +7,7 @@ use uuid::Uuid;
 /// Promotional campaign.
 pub struct Campaign {
     pub id: Uuid,
+    #[allow(dead_code)]
     pub hash: String,
     pub initial_balance: Decimal,
 }

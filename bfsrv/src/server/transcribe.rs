@@ -49,7 +49,7 @@ use uuid::Uuid;
 const VORBIS_CONTENT_TYPE: &str = "audio/ogg; codecs=vorbis";
 
 /// Ring buffer time capacity for keeping last audio segment.
-const RING_BUFFER_CAPACITY: usize = (MAX_SEGMENT_DURATION * SAMPLE_RATE) as usize;
+const RING_BUFFER_CAPACITY: usize = (2.0 * MAX_SEGMENT_DURATION * SAMPLE_RATE) as usize;
 
 /// Transcribe request query.
 #[derive(Deserialize)]
