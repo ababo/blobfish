@@ -5,6 +5,7 @@ mod transcribe;
 mod user;
 
 use crate::{
+    config::Config,
     currency_converter::CurrencyConverter,
     infsrv_pool::{self, InfsrvPool},
     mailer::Mailer,
@@ -191,6 +192,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// HTTP/WS server for Handler.
 pub struct Server {
+    config: Config,
     pg_pool: PgPool,
     infsrv_pool: InfsrvPool,
     currency_converter: CurrencyConverter,
@@ -201,6 +203,7 @@ pub struct Server {
 impl Server {
     /// Create a new Server instance.
     pub fn new(
+        config: Config,
         pg_pool: PgPool,
         infsrv_pool: InfsrvPool,
         currency_converter: CurrencyConverter,
@@ -208,6 +211,7 @@ impl Server {
         mailer: Mailer,
     ) -> Self {
         Self {
+            config,
             pg_pool,
             infsrv_pool,
             currency_converter,
@@ -217,13 +221,15 @@ impl Server {
     }
 
     /// Serve HTTP/WS requests with graceful shutdown on a given signal.
-    pub async fn serve<F>(self: Arc<Self>, address: &SocketAddr, shutdown_signal: F) -> Result<()>
+    pub async fn serve<F>(self: Arc<Self>, shutdown_signal: F) -> Result<()>
     where
         F: Future<Output = ()> + Send + 'static,
     {
         async fn handle_fallback() -> Result<Response> {
             Err(Error::HandlerNotFound)
         }
+
+        let address = self.config.server_address;
 
         // Enable page-status.html to call /payment PATCH.
         let cors = CorsLayer::new()

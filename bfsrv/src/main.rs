@@ -41,13 +41,13 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[tokio::main]
 async fn main() {
-    let config = Arc::new(Config::parse());
+    let config = Config::parse();
     if let Err(err) = run(config).await {
         eprintln!("exited with error: {}", ErrorChainDisplay(&err));
     }
 }
 
-async fn run(config: Arc<Config>) -> Result<()> {
+async fn run(config: Config) -> Result<()> {
     env_logger::builder().format_timestamp_millis().init();
 
     let pg_pool = create_pg_pool(&config).await?;
@@ -58,6 +58,7 @@ async fn run(config: Arc<Config>) -> Result<()> {
     let mailer = Mailer::new(&config);
 
     let server = Arc::new(Server::new(
+        config,
         pg_pool,
         infsrv_pool,
         currency_converter,
@@ -66,7 +67,7 @@ async fn run(config: Arc<Config>) -> Result<()> {
     ));
     let server_handle = tokio::spawn(async move {
         server
-            .serve(&config.server_address, shutdown_signal())
+            .serve(shutdown_signal())
             .await
             .expect("failed to serve HTTP/WS requests")
     });

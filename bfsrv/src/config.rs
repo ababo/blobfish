@@ -14,8 +14,8 @@ pub struct Config {
         default_value = "postgres://127.0.0.1/blobfish"
     )]
     pub database_url: Url,
-    #[clap(long, env = "SERVER_ADDRESS", default_value = "127.0.0.1:9321")]
-    pub server_address: SocketAddr,
+    #[clap(long, env = "LIMIT_AUDIO_RATE", default_value = "true")]
+    pub limit_audio_rate: bool,
     #[clap(long, env = "PAYPAL_CANCEL_URL")]
     pub paypal_cancel_url: Url,
     #[clap(long, env = "PAYPAL_CLIENT_ID")]
@@ -26,6 +26,8 @@ pub struct Config {
     pub paypal_sandbox: bool,
     #[clap(long, env = "PAYPAL_SECRET_KEY")]
     pub paypal_secret_key: String,
+    #[clap(long, env = "SERVER_ADDRESS", default_value = "127.0.0.1:9321")]
+    pub server_address: SocketAddr,
     #[clap(long, env = "SMTP_FROM")]
     pub smtp_from: EmailAddress,
     #[clap(long, env = "SMTP_USERNAME")]

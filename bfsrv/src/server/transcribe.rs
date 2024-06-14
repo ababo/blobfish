@@ -30,6 +30,7 @@ use std::{
     io::{Cursor, Error as IoError, ErrorKind as IoErrorKind},
     mem::swap,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 use symphonia::{
     core::{
@@ -43,6 +44,7 @@ use tokio::{
     io::AsyncRead,
     sync::mpsc::{unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
+    time::interval,
 };
 use uuid::Uuid;
 
@@ -160,10 +162,9 @@ async fn ws_callback(
         .await;
     });
 
-    let mut processor = AudioStreamProcessor::new();
+    let mut processor = AudioStreamProcessor::new(server.config.limit_audio_rate);
     processor
         .process(
-            server,
             infsrv_sender,
             client_receiver,
             terminator,
@@ -235,7 +236,14 @@ async fn process_segments(
         let transcribe_item = match result {
             Ok(item) => item,
             Err(err) => {
-                error!("failed to transcribe segment: {}", ErrorChainDisplay(&err));
+                if matches!(
+                    err,
+                    crate::infsrv_pool::Error::Ledger(crate::ledger::Error::NotEnoughBalance)
+                ) {
+                    debug!("not enough balance to transcribe segment");
+                } else {
+                    error!("failed to transcribe segment: {}", ErrorChainDisplay(&err));
+                }
                 break;
             }
         };
@@ -259,20 +267,21 @@ struct AudioStreamProcessor {
     resampler: Option<FastFixedIn<f32>>,
     merged: Vec<f32>,
     resampled: Vec<f32>,
+    limit_audio_rate: bool,
 }
 
 impl AudioStreamProcessor {
-    pub fn new() -> Self {
+    pub fn new(limit_audio_rate: bool) -> Self {
         Self {
             resampler: None,
             merged: Vec::new(),
             resampled: Vec::new(),
+            limit_audio_rate,
         }
     }
 
     pub async fn process(
         &mut self,
-        _server: Arc<Server>,
         infsrv_sender: Sender<Vec<u8>>,
         client_receiver: SplitStream<WebSocket>,
         terminator: Option<Vec<u8>>,
@@ -285,6 +294,11 @@ impl AudioStreamProcessor {
         let mut id_header = Vec::new();
         let mut decoder = None;
         let mut frames_consumed = 0;
+
+        let mut frames_received = 0;
+        let mut secs_elapsed = 0;
+        let mut interval = interval(Duration::from_secs(1));
+        interval.tick().await;
 
         let mut packet_index = 0;
         loop {
@@ -346,6 +360,14 @@ impl AudioStreamProcessor {
                             return;
                         }
                     };
+
+                    if self.limit_audio_rate {
+                        frames_received += buf.frames();
+                        while secs_elapsed < frames_received / buf.spec().rate as usize {
+                            interval.tick().await;
+                            secs_elapsed += 1;
+                        }
+                    }
 
                     let AudioBufferRef::F32(buf_f32) = buf else {
                         debug!("unsupported type of decoded samples");
