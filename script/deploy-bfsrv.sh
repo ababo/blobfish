@@ -136,10 +136,12 @@ http {
         }
 
         location @backend {
-            proxy_pass http://$SERVER_ADDRESS;
             proxy_http_version 1.1;
-            proxy_set_header Upgrade \\\$http_upgrade;
+            proxy_pass http://$SERVER_ADDRESS;
+
             proxy_set_header Connection \"upgrade\";
+            proxy_set_header Upgrade \\\$http_upgrade;
+            proxy_set_header X-Real-IP \\\$remote_addr;
         }
     }
 }

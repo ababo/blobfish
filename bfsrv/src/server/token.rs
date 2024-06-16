@@ -3,7 +3,7 @@ use crate::{
     server::{middleware::Auth, Error, Result, Server},
 };
 use axum::{
-    extract::{ConnectInfo, State},
+    extract::State,
     http::HeaderMap,
     response::{IntoResponse, Response},
     Json,
@@ -12,8 +12,10 @@ use axum_extra::extract::WithRejection;
 use lettre::Address as EmailAddress;
 use serde::Deserialize;
 use serde_json::{json, Map};
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use time::{Date, OffsetDateTime, Time};
+
+use super::middleware::RealIpAddress;
 
 /// Body payload for PATCH-request.
 #[derive(Deserialize)]
@@ -28,12 +30,12 @@ pub struct PostRequestPayload {
 /// Handle token POST requests.
 pub async fn handle_token_post(
     State(server): State<Arc<Server>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
+    RealIpAddress(ip_address): RealIpAddress,
     WithRejection(Json(payload), _): WithRejection<Json<PostRequestPayload>, Error>,
 ) -> Result<Response> {
     let mut client = server.pg_pool.get().await?;
-    if let Some(token) = Token::find_last_with_ip_address(&client, addr.ip()).await? {
+    if let Some(token) = Token::find_last_with_ip_address(&client, ip_address).await? {
         if token.created_at > OffsetDateTime::now_utc() - Duration::from_secs(3600) {
             return Err(Error::BadRequest("too frequent token requests".to_owned()));
         }
@@ -53,7 +55,7 @@ pub async fn handle_token_post(
         payload.label,
         user,
         payload.is_admin.unwrap_or_default(),
-        addr.ip(),
+        ip_address,
         payload.email,
     );
 

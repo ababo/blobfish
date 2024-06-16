@@ -23,7 +23,7 @@ use deadpool_postgres::Pool as PgPool;
 use log::{debug, error, info};
 use reqwest::{header::CONTENT_TYPE, Method};
 use serde_json::json;
-use std::{future::Future, net::SocketAddr, sync::Arc};
+use std::{future::Future, sync::Arc};
 use tower_http::cors::{Any, CorsLayer};
 
 /// Server error.
@@ -247,8 +247,7 @@ impl Server {
             .route("/user", post(user::handle_user_post))
             .fallback(handle_fallback)
             .with_state(self)
-            .layer(cors)
-            .into_make_service_with_connect_info::<SocketAddr>();
+            .layer(cors);
 
         info!("started HTTP/WS server");
 

@@ -9,7 +9,7 @@ use axum::{
 };
 use base64::prelude::{Engine as _, BASE64_STANDARD};
 use deadpool_postgres::Pool;
-use std::sync::Arc;
+use std::{net::IpAddr, str::FromStr, sync::Arc};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -89,6 +89,27 @@ impl FromRequestParts<Arc<Server>> for Auth {
 
     async fn from_request_parts(parts: &mut Parts, server: &Arc<Server>) -> Result<Self> {
         Self::create(&server.pg_pool, &parts.headers).await
+    }
+}
+
+/// Request IP address extractor (taken from X-Real-IP header).
+pub struct RealIpAddress(pub IpAddr);
+
+#[async_trait]
+impl<T> FromRequestParts<T> for RealIpAddress {
+    type Rejection = Error;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &T) -> Result<Self> {
+        if let Some(value) = parts.headers.get("X-Real-IP") {
+            if let Ok(value_str) = value.to_str() {
+                if let Ok(ip_address) = IpAddr::from_str(value_str) {
+                    return Ok(Self(ip_address));
+                }
+            }
+        };
+        Err(Error::Internal(
+            "failed to extract request IP address".to_owned(),
+        ))
     }
 }
 
