@@ -78,7 +78,7 @@ CREATE TABLE node_capability(
   FOREIGN KEY(capability) REFERENCES capability(id)
 );
 
-CREATE INDEX node_capability_node_idx ON node_capability(node);
+CREATE INDEX node_capability_capability_idx ON node_capability(capability);
 
 CREATE TYPE payment_processor AS ENUM('paypal');
 

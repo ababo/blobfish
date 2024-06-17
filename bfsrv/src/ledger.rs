@@ -137,6 +137,8 @@ impl Ledger {
             )
         });
 
+        let capability_ids: Vec<_> = capabilities.iter().map(|c| c.id).collect();
+
         let mut interval = interval(Duration::from_millis(10));
         let mut remains = 100;
 
@@ -144,8 +146,15 @@ impl Ledger {
         let node = loop {
             interval.tick().await;
 
-            let result =
-                Self::try_allocate_atomically(&mut client, user, compute, memory, fee).await;
+            let result = Self::try_allocate_atomically(
+                &mut client,
+                user,
+                &capability_ids,
+                compute,
+                memory,
+                fee,
+            )
+            .await;
             if !matches!(&result, Err(NotEnoughResources)) && !is_serialization_failure(&result) {
                 break result;
             }
@@ -181,6 +190,7 @@ impl Ledger {
     async fn try_allocate_atomically(
         client: &mut Client,
         user: Uuid,
+        capabilities: &[Uuid],
         compute: u32,
         memory: u32,
         fee: Decimal,
@@ -200,7 +210,8 @@ impl Ledger {
             return Err(Error::NotEnoughBalance);
         }
 
-        let Some(mut node) = Node::find_one_with_available_resources(&tx, compute, memory).await?
+        let Some(mut node) =
+            Node::find_one_with_available_resources(&tx, capabilities, compute, memory).await?
         else {
             return Err(NotEnoughResources);
         };

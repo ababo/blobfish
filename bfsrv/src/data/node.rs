@@ -20,23 +20,32 @@ impl Node {
     /// Find a node with specified resources available.
     pub async fn find_one_with_available_resources(
         client: &impl GenericClient,
+        capabilities: &[Uuid],
         compute: u32,
         memory: u32,
     ) -> Result<Option<Node>> {
         let stmt = client
             .prepare_cached(
                 "
-				SELECT *
+                WITH capable AS (
+                    SELECT node, COUNT(DISTINCT capability) AS matched
+                      FROM node_capability
+                     WHERE capability = ANY($1)
+                     GROUP BY node
+                )
+                SELECT node.*
                   FROM node
-                 WHERE compute_capacity - compute_load >= $1
-                       AND memory_capacity - memory_load >= $2
+                  JOIN capable ON node = id
+                 WHERE matched = cardinality($1)
+                       AND compute_capacity - compute_load >= $2
+                       AND memory_capacity - memory_load >= $3
                  LIMIT 1
                 ",
             )
             .await
             .unwrap();
         let row = client
-            .query_opt(&stmt, &[&(compute as i32), &(memory as i32)])
+            .query_opt(&stmt, &[&capabilities, &(compute as i32), &(memory as i32)])
             .await?;
         row.map(Self::from_row).transpose()
     }

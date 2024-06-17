@@ -34,7 +34,7 @@ impl Capability {
         let stmt = client
             .prepare_cached(
                 "
-                SELECT capability.*
+                SELECT DISTINCT capability.*
                   FROM task_type_tariff_capability
                   JOIN capability ON capability = id
                  WHERE task_type = $1 AND tariff = $2
