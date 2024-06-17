@@ -41,6 +41,7 @@ pip install --break-system-packages \
     dataclasses_json \
     fastapi \
     faster-whisper \
+    "numpy<2.0.0" \
     onnxruntime \
     pyannote-audio \
     uvicorn
