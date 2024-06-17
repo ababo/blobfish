@@ -170,7 +170,7 @@ impl Ledger {
         log::debug!(
             "allocated {allocation_id} ({} on {} for {})",
             capability_names.join(","),
-            node.id,
+            node.label,
             user
         );
 

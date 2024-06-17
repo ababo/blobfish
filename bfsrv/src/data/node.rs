@@ -17,7 +17,7 @@ pub struct Node {
 }
 
 impl Node {
-    /// Find a node with specified resources available.
+    /// Find a random node with specified resources available.
     pub async fn find_one_with_available_resources(
         client: &impl GenericClient,
         capabilities: &[Uuid],
@@ -39,6 +39,7 @@ impl Node {
                  WHERE matched = cardinality($1)
                        AND compute_capacity - compute_load >= $2
                        AND memory_capacity - memory_load >= $3
+                 ORDER BY random() -- Too few nodes to worry about inefficiency.
                  LIMIT 1
                 ",
             )
