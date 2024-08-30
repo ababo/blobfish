@@ -1,6 +1,6 @@
 # Blobfish
 
-Blobfish is an AI-powered personal assistant.
+Blobfish is a streaming Speech-To-Text server.
 
 ## The Project Structure
 
